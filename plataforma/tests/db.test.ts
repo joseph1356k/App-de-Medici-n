@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { candidatos } from "../lib/db";
+import { candidatos, sinClave } from "../lib/urls";
 
 describe("DATABASE_URL", () => {
   it("una URL del pooler de Supabase trae sola a su hermana (aws-0 ↔ aws-1)", () => {
@@ -14,4 +14,7 @@ describe("DATABASE_URL", () => {
     expect(c).toEqual(["postgres://a@x/db", "postgres://b@aws-0-eu-west-1.pooler.supabase.com/db", "postgres://b@aws-1-eu-west-1.pooler.supabase.com/db"]);
   });
   it("sin URL no hay candidatos (se usan las variables PG*)", () => { expect(candidatos(undefined)).toEqual([]); });
+  it("la contraseña no viaja a un log", () => {
+    expect(sinClave("postgres://medicion_app.abc:SECRETA@host:6543/postgres")).toBe("postgres://…@host:6543/postgres");
+  });
 });

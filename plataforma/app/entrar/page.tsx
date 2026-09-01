@@ -1,8 +1,11 @@
+import { redirect } from "next/navigation";
 import { entrar } from "./actions";
 
 export const dynamic = "force-dynamic";
 
 export default async function EntrarPage({ searchParams }: { searchParams: Promise<{ error?: string; a?: string }> }) {
+  // Sin contraseña configurada no hay login posible: pedirla sería una puerta que no abre.
+  if (!process.env.PANEL_PASSWORD || !process.env.DATABASE_URL) redirect("/instalacion");
   const sp = await searchParams;
   return (
     <main className="min-h-screen grid place-items-center p-6">

@@ -10,6 +10,9 @@
 // Sin DATABASE_URL, postgres.js lee PGHOST/PGPORT/PGDATABASE/PGUSER/PGPASSWORD — así se
 // corre en local contra un Postgres de desarrollo sin tocar el código.
 import postgres from "postgres";
+import { candidatos, sinClave } from "./urls";
+
+export { candidatos } from "./urls";
 
 type Cliente = ReturnType<typeof postgres>;
 
@@ -36,35 +39,23 @@ function opciones(url: string | undefined) {
   };
 }
 
-export function candidatos(valor: string | undefined): string[] {
-  if (!valor) return [];
-  const lista = valor.split(",").map((s) => s.trim()).filter(Boolean);
-  const out: string[] = [];
-  for (const u of lista) {
-    out.push(u);
-    const m = u.match(/aws-([01])-([a-z0-9-]+)\.pooler\.supabase\.com/);
-    if (m) {
-      const hermana = u.replace(`aws-${m[1]}-${m[2]}.pooler`, `aws-${m[1] === "0" ? "1" : "0"}-${m[2]}.pooler`);
-      if (!lista.includes(hermana)) out.push(hermana);
-    }
-  }
-  return out;
-}
-
 async function elegir(): Promise<Cliente> {
   const urls = candidatos(process.env.DATABASE_URL);
   if (urls.length === 0) return postgres(opciones(undefined));
   let ultimo: unknown = null;
   for (const url of urls) {
-    const c = postgres(url, opciones(url));
+    // El constructor DENTRO del try: una URL mal escrita lanza al construir, no al
+    // consultar, y fuera del try se llevaba por delante a la siguiente candidata.
+    let c: Cliente | null = null;
     try {
+      c = postgres(url, opciones(url));
       await c`select 1`;
-      if (urls.length > 1) console.log(`db: conectado a ${url.replace(/\/\/.*@/, "//…@")}`);
+      if (urls.length > 1) console.log(`db: conectado a ${sinClave(url)}`);
       return c;
     } catch (e) {
       ultimo = e;
-      console.warn(`db: ${url.replace(/\/\/.*@/, "//…@")} no contestó: ${(e as Error).message}`);
-      try { await c.end({ timeout: 1 }); } catch { /* nada */ }
+      console.warn(`db: ${sinClave(url)} no contestó: ${(e as Error).message}`);
+      if (c) try { await c.end({ timeout: 1 }); } catch { /* nada */ }
     }
   }
   throw ultimo instanceof Error ? ultimo : new Error("Ninguna DATABASE_URL contestó.");
