@@ -1,0 +1,23 @@
+# Fixture congelado (2026-09-01): un recorrido SAP de urgencias visto por el medidor.
+# Formato: ms|evento|dato
+#   superficie → dato = identidad sapgui (o vacío = salió de SAP)
+#   start      → StartRequest en ese instante
+#   end        → dato = busy_despues (true/false)
+# El recorrido: Easy Access → NWP1 (puesto de trabajo) → NV2000 (triage) y de vuelta al puesto.
+# Capturado del flujo real verificado el 2026-07-26 (okcd nwp1 → doubleClickItem → NV44).
+0|superficie|sapgui://QAS/SESSION_MANAGER/SAPLSMTR_NAVIGATION/0100
+2000|start|
+2600|end|false
+5000|superficie|sapgui://QAS/NWP1/SAPLN_WP_FRAMEWORK/0100
+5300|start|
+7100|end|true
+7150|end|false
+20000|start|
+20900|end|false
+30000|superficie|sapgui://QAS/NV2000/SAPMNPA10/0100/subPATEINST
+31000|start|
+33500|end|false
+60000|start|
+60700|end|false
+90000|superficie|sapgui://QAS/NWP1/SAPLN_WP_FRAMEWORK/0100
+92000|salida|

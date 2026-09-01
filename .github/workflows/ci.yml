@@ -1,0 +1,66 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # El contrato del instrumento: 22 promesas, sin pantalla, en Linux, en menos de un segundo.
+  contrato:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: "8.0.x" }
+      - run: dotnet run -c Release --project medidor/Contrato
+
+  # El .exe, publicado desde Linux (sin WPF no hace falta Windows para construirlo).
+  # Queda como artefacto descargable en cada corrida.
+  medidor-exe:
+    runs-on: ubuntu-latest
+    needs: contrato
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: "8.0.x" }
+      - run: dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o out/medidor medidor/App/App.csproj
+      - run: cp medidor/instalar.ps1 medidor/desinstalar.ps1 out/medidor/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Medidor-win-x64
+          path: out/medidor/
+          if-no-files-found: error
+
+  # La plataforma: pruebas de la ingesta (sin base) y build de producción.
+  plataforma:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: plataforma } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22", cache: npm, cache-dependency-path: plataforma/package-lock.json }
+      - run: npm ci
+      - run: npm test
+      - run: npm run typecheck
+      - run: npm run build
+        env:
+          PANEL_PASSWORD: build
+          MEDIDOR_API_KEY: build
+
+  # El esquema SQL, aplicado dos veces sobre un Postgres limpio (idempotencia).
+  esquema:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env: { POSTGRES_PASSWORD: postgres }
+        ports: ["5432:5432"]
+        options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          psql -v ON_ERROR_STOP=1 postgres://postgres:postgres@localhost:5432/postgres -f plataforma/supabase/schema.sql
+          psql -v ON_ERROR_STOP=1 postgres://postgres:postgres@localhost:5432/postgres -f plataforma/supabase/schema.sql
+          psql -v ON_ERROR_STOP=1 postgres://postgres:postgres@localhost:5432/postgres -f plataforma/supabase/prueba-esquema.sql

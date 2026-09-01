@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    LAS PROMESAS DEL MEDIDOR, escritas como pruebas que llaman al código real.
+
+    Hermano del contrato del mapeador y separado por la misma razón: este juzga EL INSTRUMENTO DE
+    MEDICIÓN — un subsistema que se da por bueno a sí mismo por construcción, porque si cuenta mal
+    los números «se ven normales». Y aquí contar mal no rompe una demo: contamina el baseline de un
+    estudio que no se puede volver a medir.
+
+    Las promesas 1-6 son de PRIVACIDAD y van primero a propósito: mientras el arnés no pueda
+    demostrar que ningún título de ventana ni identificador crudo sale en un lote, el resto es
+    cosmético. Corre sin pantalla, sin Windows y sin red — por eso dura menos de un segundo, y por
+    eso corre en CI y en el Linux donde se desarrolla.
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>contrato-medidor</AssemblyName>
+    <RootNamespace>Medidor.Pruebas</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Dominio\Dominio.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- El fixture congelado viaja junto al binario: mismo resultado en cualquier máquina. -->
+    <None Include="bronce\**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

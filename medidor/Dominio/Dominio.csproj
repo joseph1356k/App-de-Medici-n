@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    EL DOMINIO DEL MEDIDOR: sesionización, cubetas, huella, spool — todo lo que se puede juzgar
+    sin una pantalla delante.
+
+    Sin WPF y sin Windows, por la misma razón que el Pulso del mapeador: lo que no se puede probar
+    barato no se prueba, y este subsistema alimenta un ESTUDIO — un error aquí no rompe una demo,
+    contamina un baseline que no se puede volver a medir. El contrato de al lado corre en menos de
+    un segundo, en Linux y en CI.
+
+    La única dependencia con estado es SQLite (el spool durable). Microsoft.Data.Sqlite corre en
+    cualquier SO, así que el spool también se juzga sin Windows — incluida la simulación de un
+    kill a mitad de turno (cerrar y reabrir la base).
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>Medidor.Dominio</AssemblyName>
+    <RootNamespace>Medidor</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.10" />
+  </ItemGroup>
+
+</Project>

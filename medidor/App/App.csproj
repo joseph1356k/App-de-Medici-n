@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Medidor.exe — el instrumento que mide el trabajo clínico en el PC del médico.
+
+    SIN WPF Y SIN WINFORMS, a propósito: toda la interfaz es Win32 puro por P/Invoke (icono de
+    bandeja, menú contextual, cuadros de mensaje). No es minimalismo por gusto: es lo que hace que
+    este proyecto COMPILE Y SE PUBLIQUE DESDE LINUX (`dotnet publish -r win-x64`), donde corre el
+    contrato en CI. Con WPF, el .exe solo se podía construir en una máquina Windows con el SDK de
+    escritorio — y «no se pudo compilar» era la excusa para que el instrumento nunca existiera.
+
+    net8.0-windows (no net8.0): habilita el análisis de plataforma y deja usar DPAPI y COM sin
+    avisos; no arrastra el SDK de escritorio, así que sigue construyéndose en Linux.
+  -->
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>Medidor</AssemblyName>
+    <RootNamespace>Medidor.App</RootNamespace>
+    <Version>1.0.0</Version>
+    <Product>Medidor de trabajo clínico</Product>
+    <Company>Miracle</Company>
+    <ApplicationIcon>iconos\medidor.ico</ApplicationIcon>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <!-- Publicación en UN solo archivo con el runtime dentro: el PC del hospital no necesita
+         tener .NET instalado. La librería nativa de SQLite se extrae sola al arrancar. -->
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <DebugType>embedded</DebugType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Dominio\Dominio.csproj" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+  </ItemGroup>
+
+</Project>
