@@ -19,7 +19,7 @@ local: `PGHOST=... npm run db:aplicar`.
    - `DATABASE_URL` — la del paso 1.
    - `MEDIDOR_API_KEY` — inventa una clave larga (p. ej. 40 caracteres aleatorios). La pondrás en los PCs.
    - `PANEL_PASSWORD` — la contraseña del panel.
-   - `CRON_SECRET` — opcional; Vercel lo usa para el cron horario que recalcula resúmenes pendientes.
+   - `CRON_SECRET` — opcional; Vercel lo usa para el cron diario (06:00 UTC) que recalcula resúmenes rezagados.
 4. *Deploy*. Abre la URL → `/entrar` → contraseña.
 5. **Configuración** → escribe los médicos, uno por línea: `Dra. Ana Gómez | AGOMEZ` (después de `|`, sus
    usuarios de SAP; opcional pero con ellos el turno se asigna solo).

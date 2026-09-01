@@ -68,7 +68,7 @@ políticas por si el Postgres es Supabase (la REST pública no puede leer). El p
 contraseña y una cookie HMAC; las exportaciones aceptan `?clave=` para pegarlas en una herramienta.
 
 **Resumen al instante.** El lote recalcula `shift_summary` de los turnos tocados: el panel va a un
-minuto del terreno sin cron. El cron horario solo recoge rezagados. `algo_version` permite recomputar
+minuto del terreno sin cron. El cron diario solo recoge rezagados. `algo_version` permite recomputar
 todo si cambia una definición (`/api/tareas/resumir?todo=1`).
 
 **Calidad como filtro, no como nota al pie.** `calidad_ok` = cobertura ≥ 85 % y sin saltos de reloj y sin
