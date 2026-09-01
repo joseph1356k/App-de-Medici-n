@@ -1,7 +1,12 @@
+using System.Collections.Concurrent;
 using System.Reflection;
 using System.Runtime.Versioning;
 
 namespace Medidor.App;
+
+/// <summary>Un round-trip de SAP visto por sus eventos COM: StartRequest (EsInicio) o EndRequest, con el
+/// instante monotónico y, al terminar, si SAP quedó ocupado o listo.</summary>
+public readonly record struct EventoSap(bool EsInicio, long MonoMs, bool BusyDespues);
 
 /// <summary>Lo que SAP contó en un tick: la identidad de la pantalla (o null si SAP no está
 /// delante), si estaba ocupado (tick saltado), el usuario SAP y el título de la ventana.
@@ -39,7 +44,17 @@ public sealed class SapGui
     private dynamic? _ultimaSesion;
     private DateTime _proximoIntento = DateTime.MinValue;
 
+    private SapComEvents? _eventos;
+    private string _idSesionConEventos = "";
+    private DateTime _proximoIntentoEventos = DateTime.MinValue;
+
     public bool Enganchado => _motor != null;
+
+    /// <summary>Los StartRequest/EndRequest que llegaron desde la última vez que alguien los drenó.
+    /// Los encola el hilo SAP (los eventos COM llegan ahí); los drena el orquestador en su tick.</summary>
+    public ConcurrentQueue<EventoSap> Eventos { get; } = new();
+
+    public bool EventosEnganchados => _eventos != null;
 
     /// <summary>Mira la sesión SAP cuya ventana es <paramref name="hwndRaiz"/> (la de primer plano).
     /// Si ninguna sesión está delante, devuelve <see cref="VistaSap.Nada"/>. Si la que está delante
@@ -74,6 +89,7 @@ public sealed class SapGui
                     if (hwnd == hwndRaiz || Win32.GetAncestor(hwnd, Win32.GA_ROOT) == hwndRaiz)
                     {
                         _ultimaSesion = s;
+                        AsegurarEventos(s);
                         return Identidad(s);
                     }
                 }
@@ -185,11 +201,47 @@ public sealed class SapGui
         return null;
     }
 
+    /// <summary>Engancha StartRequest/EndRequest en la sesión que está delante (una vez por sesión).
+    /// Si el enganche falla, se anota el diagnóstico y se reintenta al minuto: las visitas siguen
+    /// midiéndose por identidad; solo la espera y el time-to-ready quedan sin dato.</summary>
+    private void AsegurarEventos(dynamic s)
+    {
+        string id;
+        try { id = Str(s.Id); } catch { return; }
+        if (id == _idSesionConEventos && (_eventos != null || DateTime.UtcNow < _proximoIntentoEventos)) return;
+
+        _eventos?.Dispose();
+        _eventos = null;
+        _idSesionConEventos = id;
+
+        var ev = new SapComEvents((object)s);
+        ev.Disparado += (nombre, t) =>
+        {
+            bool busy = false;
+            try { busy = (bool)s.Busy; } catch { /* a mitad de un round-trip SAP puede no contestar */ }
+            Eventos.Enqueue(new EventoSap(nombre.Equals("StartRequest", StringComparison.OrdinalIgnoreCase), t, busy));
+        };
+        if (ev.Enganchar(out var diagnostico))
+        {
+            _eventos = ev;
+            Registro.Anota("sap", $"eventos COM enganchados en {id}: {diagnostico}");
+        }
+        else
+        {
+            ev.Dispose();
+            _proximoIntentoEventos = DateTime.UtcNow.AddMinutes(1);
+            Registro.Anota("sap", $"eventos COM no disponibles ({diagnostico}): la espera y el time-to-ready quedan sin dato");
+        }
+    }
+
     private void Soltar(string donde, Exception e)
     {
         // SAP se cerró o el proxy COM murió: se suelta el motor y se reintenta luego. La cadena
         // entera de la excepción, por tipo: aquí no hay contenido clínico, solo el motivo.
         Registro.Anota("sap", $"se soltó el motor ({donde}): {e.GetType().Name}");
+        _eventos?.Dispose();
+        _eventos = null;
+        _idSesionConEventos = "";
         _motor = null;
         _ultimaSesion = null;
         _proximoIntento = DateTime.UtcNow.AddSeconds(5);

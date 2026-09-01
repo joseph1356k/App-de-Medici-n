@@ -57,6 +57,24 @@ export default async function ResumenPage({ searchParams }: { searchParams: Prom
             <Tile label="Pantalla lista (p95)" value={fmtSeg(k.ready_p95_med)} sub="time-to-ready" />
           </div>
 
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Flujo e interacción · medianas por turno</p>
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
+              <Tile label="Duración de una consulta" value={fmtMin(k.consulta_med)} sub="del primer al último toque del paciente" />
+              <Tile label="Hasta el siguiente paciente" value={fmtMin(k.entre_consultas_med)} sub="disponible para el próximo" />
+              <Tile label="Pacientes por hora" value={fmtNum(k.consultas_por_hora_med, 1)} />
+              <Tile label="Interrupciones" value={fmtNum(k.interrupciones_med)} sub="vueltas a un paciente ya abierto" />
+              <Tile label="Revisitas de pantalla" value={fmtNum(k.revisitas_med)} sub="idas y vueltas en SAP" />
+              <Tile label="Carga en SAP" value={fmtPct(k.carga_admin_med)} sub="del tiempo activo" />
+              <Tile label="Copiar · pegar" value={`${fmtNum(k.copias_med)} · ${fmtNum(k.pegados_med)}`} />
+              <Tile label="Correcciones" value={fmtNum(k.correcciones_med)} sub="Backspace + Supr" />
+              <Tile label="Tab · Enter" value={`${fmtNum(k.tabs_med)} · ${fmtNum(k.enters_med)}`} sub="navegación por campos" />
+              <Tile label="Guardados (Ctrl+S)" value={fmtNum(k.guardados_med)} />
+              <Tile label="Pantallas SAP distintas" value={fmtNum(k.pantallas_med)} />
+              <Tile label="Tecleo total" value={fmtNum(k.escritura_med == null ? null : k.escritura_med / 60000, 1) + " min"} sub="ráfagas" />
+            </div>
+          </div>
+
           <Seccion titulo="Minutos por turno, día a día" sub="Mediana de los turnos de cada día operativo (corte 06:00). Un día sin punto es un día sin turnos de buena calidad.">
             <SerieDiaria puntos={serie.map((p) => ({ ...p, activo_ms: p.activo_ms == null ? null : Number(p.activo_ms), his_ms: p.his_ms == null ? null : Number(p.his_ms) }))} />
           </Seccion>

@@ -10,6 +10,10 @@ namespace Medidor.App;
 /// Solo toca COM cuando la ventana de primer plano es de un proceso SAP (saplogon.exe…). Si el
 /// médico está en otra cosa, este hilo no gasta nada. Cadencia 1,5 s: 5-8 llamadas COM por tick,
 /// muy por debajo de lo que degrada SAP.
+///
+/// Entre sondeo y sondeo el hilo BOMBEA mensajes en vez de dormir: los eventos COM de SAP
+/// (StartRequest/EndRequest, la espera real del servidor) llegan a un hilo STA solo a través de
+/// su bomba de mensajes. Un Thread.Sleep aquí sería un buzón cerrado.
 /// </summary>
 [SupportedOSPlatform("windows")]
 public sealed class HiloSap : IDisposable
@@ -34,7 +38,16 @@ public sealed class HiloSap : IDisposable
 
     public VistaSap Ultima => _ultima;
     public bool Enganchado => _sap.Enganchado;
+    public bool EventosEnganchados => _sap.EventosEnganchados;
     public int SaltadosPorBusy => _saltadosPorBusy;
+
+    /// <summary>Saca todos los StartRequest/EndRequest acumulados desde el último drenado.</summary>
+    public List<EventoSap> Drenar()
+    {
+        var lista = new List<EventoSap>();
+        while (_sap.Eventos.TryDequeue(out var e)) lista.Add(e);
+        return lista;
+    }
 
     /// <summary>Lee UN campo SAP por selector para la regla de extracción del paciente. El que llama
     /// lo hashea y lo suelta. Corre en el hilo que llama; SapGui protege con Busy.</summary>
@@ -60,7 +73,26 @@ public sealed class HiloSap : IDisposable
             }
             catch (Exception e) { Registro.Excepcion("sap", e); _ultima = VistaSap.Nada; }
 
-            Thread.Sleep(Math.Clamp(_cadenciaMs(), 500, 10_000));
+            Bombear(Math.Clamp(_cadenciaMs(), 500, 10_000));
+        }
+    }
+
+    /// <summary>Espera <paramref name="ms"/> despachando los mensajes que lleguen (ahí vienen los
+    /// eventos COM). Un WM_QUIT en este hilo termina la espera.</summary>
+    private static void Bombear(int ms)
+    {
+        long fin = Environment.TickCount64 + ms;
+        while (true)
+        {
+            long resta = fin - Environment.TickCount64;
+            if (resta <= 0) return;
+            Win32.MsgWaitForMultipleObjectsEx(0, IntPtr.Zero, (uint)resta, Win32.QS_ALLINPUT, Win32.MWMO_INPUTAVAILABLE);
+            while (Win32.PeekMessageW(out var m, IntPtr.Zero, 0, 0, Win32.PM_REMOVE))
+            {
+                if (m.message == Win32.WM_QUIT) return;
+                Win32.TranslateMessage(ref m);
+                Win32.DispatchMessageW(ref m);
+            }
         }
     }
 

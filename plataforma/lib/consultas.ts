@@ -18,6 +18,9 @@ export type Kpis = {
   clics_med: number | null; cambios_med: number | null; encounters_med: number | null; por_encounter_med: number | null;
   post_med: number | null; cola_med: number | null; espera_sap_med: number | null; ready_p95_med: number | null;
   duracion_med: number | null; pantallas_med: number | null;
+  tabs_med: number | null; enters_med: number | null; correcciones_med: number | null; copias_med: number | null;
+  pegados_med: number | null; guardados_med: number | null; interrupciones_med: number | null; revisitas_med: number | null;
+  consultas_por_hora_med: number | null; consulta_med: number | null; entre_consultas_med: number | null; carga_admin_med: number | null;
 };
 
 export async function kpis(f: Filtros): Promise<Kpis> {
@@ -36,7 +39,19 @@ export async function kpis(f: Filtros): Promise<Kpis> {
       percentile_cont(0.5) within group (order by sap_wait_ms_total) as espera_sap_med,
       percentile_cont(0.5) within group (order by ready_ms_p95) filter (where ready_ms_p95 is not null) as ready_p95_med,
       percentile_cont(0.5) within group (order by duracion_ms) as duracion_med,
-      percentile_cont(0.5) within group (order by pantallas_distintas) as pantallas_med
+      percentile_cont(0.5) within group (order by pantallas_distintas) as pantallas_med,
+      percentile_cont(0.5) within group (order by tabs) as tabs_med,
+      percentile_cont(0.5) within group (order by enters) as enters_med,
+      percentile_cont(0.5) within group (order by correcciones) as correcciones_med,
+      percentile_cont(0.5) within group (order by copias) as copias_med,
+      percentile_cont(0.5) within group (order by pegados) as pegados_med,
+      percentile_cont(0.5) within group (order by guardados) as guardados_med,
+      percentile_cont(0.5) within group (order by interrupciones) as interrupciones_med,
+      percentile_cont(0.5) within group (order by revisitas_sap) as revisitas_med,
+      percentile_cont(0.5) within group (order by consultas_por_hora) filter (where consultas_por_hora is not null) as consultas_por_hora_med,
+      percentile_cont(0.5) within group (order by consulta_ms_mediana) filter (where consulta_ms_mediana is not null) as consulta_med,
+      percentile_cont(0.5) within group (order by entre_consultas_ms_mediana) filter (where entre_consultas_ms_mediana is not null) as entre_consultas_med,
+      percentile_cont(0.5) within group (order by carga_admin_pct) filter (where carga_admin_pct is not null) as carga_admin_med
     from shift_summary m where ${buenos(f)}`;
   return k;
 }
@@ -125,6 +140,9 @@ export type Turno = FilaTurno & {
   ready_ms_p50: number | null; ready_ms_p95: number | null; pantallas_distintas: number; visitas: number;
   active_ms_por_app: Record<string, number>; calidad: Record<string, unknown>; app_version: string; hooks_degradados: boolean;
   ticks_sap_saltados_busy: number; huecos_ms: number; clock_jumps: number; spool_dropped: number;
+  tabs: number; enters: number; correcciones: number; copias: number; pegados: number; guardados: number;
+  interrupciones: number; revisitas_sap: number; consultas_por_hora: number | null; consulta_ms_mediana: number | null;
+  entre_consultas_ms_mediana: number | null; carga_admin_pct: number | null;
 };
 
 export async function turno(id: string): Promise<Turno | null> {
@@ -186,6 +204,9 @@ export type FilaFase = {
   phase: string; n: number; medicos: number; activo_med: number | null; his_med: number | null; miracle_med: number | null; escritura_med: number | null;
   clics_med: number | null; cambios_med: number | null; encounters_med: number | null; por_encounter_med: number | null;
   post_med: number | null; cola_med: number | null; espera_sap_med: number | null; ready_p95_med: number | null; pantallas_med: number | null;
+  tabs_med: number | null; enters_med: number | null; correcciones_med: number | null; copias_med: number | null;
+  pegados_med: number | null; guardados_med: number | null; interrupciones_med: number | null; revisitas_med: number | null;
+  consultas_por_hora_med: number | null; consulta_med: number | null; entre_consultas_med: number | null; carga_admin_med: number | null;
 };
 
 export async function porFase(f: Filtros): Promise<FilaFase[]> {
@@ -203,7 +224,19 @@ export async function porFase(f: Filtros): Promise<FilaFase[]> {
       percentile_cont(0.5) within group (order by cola_post_turno_ms) as cola_med,
       percentile_cont(0.5) within group (order by sap_wait_ms_total) as espera_sap_med,
       percentile_cont(0.5) within group (order by ready_ms_p95) filter (where ready_ms_p95 is not null) as ready_p95_med,
-      percentile_cont(0.5) within group (order by pantallas_distintas) as pantallas_med
+      percentile_cont(0.5) within group (order by pantallas_distintas) as pantallas_med,
+      percentile_cont(0.5) within group (order by tabs) as tabs_med,
+      percentile_cont(0.5) within group (order by enters) as enters_med,
+      percentile_cont(0.5) within group (order by correcciones) as correcciones_med,
+      percentile_cont(0.5) within group (order by copias) as copias_med,
+      percentile_cont(0.5) within group (order by pegados) as pegados_med,
+      percentile_cont(0.5) within group (order by guardados) as guardados_med,
+      percentile_cont(0.5) within group (order by interrupciones) as interrupciones_med,
+      percentile_cont(0.5) within group (order by revisitas_sap) as revisitas_med,
+      percentile_cont(0.5) within group (order by consultas_por_hora) filter (where consultas_por_hora is not null) as consultas_por_hora_med,
+      percentile_cont(0.5) within group (order by consulta_ms_mediana) filter (where consulta_ms_mediana is not null) as consulta_med,
+      percentile_cont(0.5) within group (order by entre_consultas_ms_mediana) filter (where entre_consultas_ms_mediana is not null) as entre_consultas_med,
+      percentile_cont(0.5) within group (order by carga_admin_pct) filter (where carga_admin_pct is not null) as carga_admin_med
     from shift_summary m where ${buenos({ ...f, fase: null })}
     group by phase order by array_position(array['baseline','notes','notes_ops'], phase)`;
 }

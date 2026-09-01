@@ -160,10 +160,23 @@ create table if not exists samples (
   context_switches int not null default 0,
   sap_roundtrips int not null default 0,
   sap_wait_ms int not null default 0,
+  tabs int not null default 0,            -- teclas de control: solo se distinguen estas seis
+  enters int not null default 0,
+  correcciones int not null default 0,    -- Backspace / Supr
+  copias int not null default 0,          -- Ctrl+C / Ctrl+Ins
+  pegados int not null default 0,         -- Ctrl+V / Mayús+Ins
+  guardados int not null default 0,       -- Ctrl+S
   created_at timestamptz not null default now(),
   unique (shift_id, bucket_start, seq)
 );
 alter table samples enable row level security;
+-- Para bases creadas con una versión anterior del esquema (idempotente).
+alter table samples add column if not exists tabs int not null default 0;
+alter table samples add column if not exists enters int not null default 0;
+alter table samples add column if not exists correcciones int not null default 0;
+alter table samples add column if not exists copias int not null default 0;
+alter table samples add column if not exists pegados int not null default 0;
+alter table samples add column if not exists guardados int not null default 0;
 create index if not exists samples_time_idx on samples (bucket_start desc);
 create index if not exists samples_shift_enc_idx on samples (shift_id, encounter_key);
 
@@ -245,13 +258,37 @@ create table if not exists shift_summary (
   ready_ms_p95 bigint,
   pantallas_distintas int not null default 0,
   visitas int not null default 0,
+  tabs bigint not null default 0,
+  enters bigint not null default 0,
+  correcciones bigint not null default 0,
+  copias bigint not null default 0,
+  pegados bigint not null default 0,
+  guardados bigint not null default 0,
+  interrupciones int not null default 0,          -- vueltas a un paciente ya abierto (A→B→A)
+  revisitas_sap int not null default 0,           -- volver a una pantalla ya visitada con el mismo paciente
+  consultas_por_hora numeric,
+  consulta_ms_mediana bigint,                     -- reloj de pared: primer → último instante con actividad del paciente
+  entre_consultas_ms_mediana bigint,              -- del último instante de un paciente al primero del siguiente
+  carga_admin_pct numeric,                        -- % del tiempo activo que fue en SAP
   cobertura_pct numeric,
   calidad jsonb not null default '{}'::jsonb,
   calidad_ok boolean not null default true,
-  algo_version int not null default 2,
+  algo_version int not null default 3,
   computed_at timestamptz not null default now()
 );
 alter table shift_summary enable row level security;
+alter table shift_summary add column if not exists tabs bigint not null default 0;
+alter table shift_summary add column if not exists enters bigint not null default 0;
+alter table shift_summary add column if not exists correcciones bigint not null default 0;
+alter table shift_summary add column if not exists copias bigint not null default 0;
+alter table shift_summary add column if not exists pegados bigint not null default 0;
+alter table shift_summary add column if not exists guardados bigint not null default 0;
+alter table shift_summary add column if not exists interrupciones int not null default 0;
+alter table shift_summary add column if not exists revisitas_sap int not null default 0;
+alter table shift_summary add column if not exists consultas_por_hora numeric;
+alter table shift_summary add column if not exists consulta_ms_mediana bigint;
+alter table shift_summary add column if not exists entre_consultas_ms_mediana bigint;
+alter table shift_summary add column if not exists carga_admin_pct numeric;
 create index if not exists shift_summary_fecha_idx on shift_summary (fecha_operativa desc);
 create index if not exists shift_summary_phase_idx on shift_summary (phase, doctor_id);
 
@@ -314,6 +351,15 @@ $$;
 --   cobertura_pct     foreground medido / duración del turno. < 85 % = el medidor perdió
 --                     tiempo (suspensión, kill, reloj) y el turno no es comparable.
 --   calidad_ok        cobertura >= 85 y sin saltos de reloj y sin descartes del spool.
+-- (algo_version = 3 añade:)
+--   interrupciones    vueltas a un paciente que ya se había abierto antes en el turno.
+--   revisitas_sap     volver a una pantalla ya visitada dentro del mismo paciente.
+--   consulta_ms       del primer al último instante con actividad de cada paciente (reloj de pared).
+--   entre_consultas   en cada cambio de paciente, del último instante con actividad del anterior
+--                     al primero del siguiente: cuánto tarda el médico en «quedar disponible» para
+--                     el próximo (aproximación al time to administrative readiness; el momento en
+--                     que el paciente se va físicamente no es observable).
+--   carga_admin_pct   % del tiempo activo que fue en SAP.
 create or replace function recompute_shift_summary(p_shift uuid)
 returns void language plpgsql as $$
 declare
@@ -339,6 +385,8 @@ begin
     typing_ms, keystrokes, clicks, scroll_ticks, context_switches,
     encounters, encounter_active_ms_mediana, post_atencion_ms, cola_post_turno_ms,
     sap_wait_ms_total, sap_roundtrips, ready_ms_p50, ready_ms_p95, pantallas_distintas, visitas,
+    tabs, enters, correcciones, copias, pegados, guardados,
+    interrupciones, revisitas_sap, consultas_por_hora, consulta_ms_mediana, entre_consultas_ms_mediana, carga_admin_pct,
     cobertura_pct, calidad, calidad_ok, algo_version, computed_at)
   select
     p_shift, sh.doctor_id, sh.device_id, phase_at(v_fecha), v_fecha, sh.started_at, sh.ended_at,
@@ -378,12 +426,46 @@ begin
     (select round(percentile_cont(0.95) within group (order by ready_ms))::bigint from sap_visits where shift_id = p_shift and ready_ms is not null),
     (select count(distinct surface) from sap_visits where shift_id = p_shift),
     (select count(*) from sap_visits where shift_id = p_shift),
+    coalesce((select sum(tabs) from samples where shift_id = p_shift), 0),
+    coalesce((select sum(enters) from samples where shift_id = p_shift), 0),
+    coalesce((select sum(correcciones) from samples where shift_id = p_shift), 0),
+    coalesce((select sum(copias) from samples where shift_id = p_shift), 0),
+    coalesce((select sum(pegados) from samples where shift_id = p_shift), 0),
+    coalesce((select sum(guardados) from samples where shift_id = p_shift), 0),
+    -- interrupciones: segunda (o más) apertura del mismo paciente en el turno
+    (select count(*)::int from (
+       select row_number() over (partition by encounter_key order by occurred_at) as rn
+       from events where shift_id = p_shift and kind = 'encounter_enter' and encounter_key is not null) x
+     where x.rn > 1),
+    -- revisitas: la misma pantalla otra vez con el mismo paciente
+    (select count(*)::int from (
+       select row_number() over (partition by coalesce(encounter_key, ''), surface order by entered_at) as rn
+       from sap_visits where shift_id = p_shift) y
+     where y.rn > 1),
+    case when v_dur > 0 then round(((select count(distinct encounter_key) from samples
+                                     where shift_id = p_shift and encounter_key is not null) * 3600000.0 / v_dur)::numeric, 2)
+         else null end,
+    (select percentile_cont(0.5) within group (order by d)::bigint from (
+       select (extract(epoch from (max(bucket_start) - min(bucket_start))) * 1000 + 15000)::double precision as d
+       from samples where shift_id = p_shift and encounter_key is not null group by encounter_key) e),
+    -- entre consultas: en cada cambio de paciente (A→B), del último instante con actividad de A al
+    -- primero de B. Por tramos, no por paciente: en urgencias A vuelve después de B y el «último
+    -- instante de A» sería posterior al primero de B.
+    (select percentile_cont(0.5) within group (order by gap)::bigint from (
+       select (extract(epoch from (bucket_start - lag(bucket_start) over (order by bucket_start, seq))) * 1000 - 15000)::double precision as gap,
+              encounter_key, lag(encounter_key) over (order by bucket_start, seq) as anterior
+       from samples where shift_id = p_shift and encounter_key is not null) r
+     where anterior is not null and anterior <> encounter_key and gap >= 0),
+    case when (select coalesce(sum(active_ms), 0) from samples where shift_id = p_shift) > 0
+         then round(((select coalesce(sum(active_ms), 0) from samples where shift_id = p_shift and app = 'sap') * 100.0
+                     / (select sum(active_ms) from samples where shift_id = p_shift))::numeric, 1)
+         else null end,
     v_cobertura,
     jsonb_build_object('cobertura_pct', v_cobertura, 'huecos_ms', sh.huecos_ms, 'clock_jumps', sh.clock_jumps,
       'spool_dropped', sh.spool_dropped, 'hooks_degradados', sh.hooks_degradados,
       'ticks_sap_saltados_busy', sh.ticks_sap_saltados_busy),
     (v_cobertura >= 85 and sh.clock_jumps = 0 and sh.spool_dropped = 0),
-    2, now()
+    3, now()
   on conflict (shift_id) do update set
     doctor_id = excluded.doctor_id, device_id = excluded.device_id, phase = excluded.phase,
     fecha_operativa = excluded.fecha_operativa, started_at = excluded.started_at, ended_at = excluded.ended_at,
@@ -397,6 +479,11 @@ begin
     sap_wait_ms_total = excluded.sap_wait_ms_total, sap_roundtrips = excluded.sap_roundtrips,
     ready_ms_p50 = excluded.ready_ms_p50, ready_ms_p95 = excluded.ready_ms_p95,
     pantallas_distintas = excluded.pantallas_distintas, visitas = excluded.visitas,
+    tabs = excluded.tabs, enters = excluded.enters, correcciones = excluded.correcciones,
+    copias = excluded.copias, pegados = excluded.pegados, guardados = excluded.guardados,
+    interrupciones = excluded.interrupciones, revisitas_sap = excluded.revisitas_sap,
+    consultas_por_hora = excluded.consultas_por_hora, consulta_ms_mediana = excluded.consulta_ms_mediana,
+    entre_consultas_ms_mediana = excluded.entre_consultas_ms_mediana, carga_admin_pct = excluded.carga_admin_pct,
     cobertura_pct = excluded.cobertura_pct, calidad = excluded.calidad, calidad_ok = excluded.calidad_ok,
     algo_version = excluded.algo_version, computed_at = now();
 end;

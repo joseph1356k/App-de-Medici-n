@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Runtime.Versioning;
 
 namespace Medidor.App;
@@ -29,8 +28,8 @@ public sealed class Orquestador
     private readonly Action<string, DateTimeOffset, Guid?, string?, IReadOnlyDictionary<string, object?>?> _emitirEvento;
     private readonly Action<Guid, Visita, string?> _emitirVisita;
 
-    private readonly Stopwatch _mono = Stopwatch.StartNew();
     private string? _encounterVigente;
+    private long? _inicioDeRoundtrip;
     private string? _claveContextoAnterior;
     private string? _ultimaSurfaceSap;
     private bool _pausado;
@@ -49,7 +48,7 @@ public sealed class Orquestador
         _cubetas = cubetas; _calidad = calidad; _viaje = viaje;
         _config = config; _claveDelDia = claveDelDia;
         _emitirEvento = emitirEvento; _emitirVisita = emitirVisita;
-        _reloj = new Reloj(_mono.ElapsedMilliseconds, DateTimeOffset.UtcNow);
+        _reloj = new Reloj(Environment.TickCount64, DateTimeOffset.UtcNow);
     }
 
     public bool Pausado => _pausado;
@@ -84,13 +83,15 @@ public sealed class Orquestador
     public void Bloqueado(bool bloqueado)
     {
         if (!bloqueado) _bloqueadoDesdeMono = null;
-        else _bloqueadoDesdeMono ??= _mono.ElapsedMilliseconds;
+        else _bloqueadoDesdeMono ??= Environment.TickCount64;
     }
 
     /// <summary>Un tick. Devuelve el cierre de turno si lo hubo (el que llama emite el turno cerrado).</summary>
     public CierreDeTurno? Tick()
     {
-        var ahoraMono = _mono.ElapsedMilliseconds;
+        // Reloj monotónico COMPARTIDO con el hilo SAP (Environment.TickCount64): los StartRequest/
+        // EndRequest llegan con ese mismo reloj, y restar instantes de relojes distintos no significa nada.
+        var ahoraMono = Environment.TickCount64;
         var pared = DateTimeOffset.Now; // LOCAL: el día operativo y las cubetas se anclan a la hora del hospital
         var tic = _reloj.Avanzar(ahoraMono, DateTimeOffset.UtcNow);
         var calidad = _calidad();
@@ -134,6 +135,28 @@ public sealed class Orquestador
 
         var cfg = _config();
         var vistaSap = _sap.Ultima;
+
+        // Los round-trips de SAP que llegaron desde el tick anterior: al Viaje (espera y time-to-ready
+        // de la visita en curso) y a la cubeta (espera y round-trips de este tick).
+        int roundtripsTick = 0; long esperaTick = 0;
+        foreach (var e in _sap.Drenar())
+        {
+            if (e.EsInicio)
+            {
+                _viaje.AlStartRequest(e.MonoMs);
+                _inicioDeRoundtrip = e.MonoMs;
+            }
+            else
+            {
+                _viaje.AlEndRequest(e.MonoMs, e.BusyDespues);
+                if (_inicioDeRoundtrip is long inicio && e.MonoMs >= inicio)
+                {
+                    esperaTick += e.MonoMs - inicio;
+                    roundtripsTick++;
+                    _inicioDeRoundtrip = null;
+                }
+            }
+        }
 
         if (!string.IsNullOrWhiteSpace(vistaSap.SapUser) && vistaSap.SapUser != _sapUserVisto)
         {
@@ -194,8 +217,10 @@ public sealed class Orquestador
             Clics: input.Clics,
             Scroll: input.Scroll,
             CambiosDeContexto: cambios,
-            SapRoundtrips: 0,
-            SapEsperaMs: 0));
+            SapRoundtrips: roundtripsTick,
+            SapEsperaMs: (int)Math.Min(esperaTick, int.MaxValue),
+            Tabs: input.Tabs, Enters: input.Enters, Correcciones: input.Correcciones,
+            Copias: input.Copias, Pegados: input.Pegados, Guardados: input.Guardados));
         return cierre;
     }
 
@@ -230,6 +255,6 @@ public sealed class Orquestador
         _encounterVigente = null;
         _ultimaSurfaceSap = null;
         _claveContextoAnterior = null;
-        return _viaje.CerrarPendiente(_mono.ElapsedMilliseconds, pared);
+        return _viaje.CerrarPendiente(Environment.TickCount64, pared);
     }
 }

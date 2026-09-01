@@ -46,6 +46,16 @@ export default async function TurnoPage({ params }: { params: Promise<{ id: stri
         <Tile label="Cola post-turno" value={fmtMin(t.cola_post_turno_ms)} sub="SAP tras el último paciente" />
         <Tile label="Espera de SAP" value={fmtSeg(t.sap_wait_ms_total)} sub={`${fmtNum(t.sap_roundtrips)} round-trips`} />
         <Tile label="Pantalla lista p50 · p95" value={`${fmtSeg(t.ready_ms_p50)} · ${fmtSeg(t.ready_ms_p95)}`} sub={`${t.visitas} visitas · ${t.pantallas_distintas} pantallas`} />
+        <Tile label="Duración por consulta" value={fmtMin(t.consulta_ms_mediana)} sub="mediana, reloj de pared" />
+        <Tile label="Hasta el siguiente paciente" value={fmtMin(t.entre_consultas_ms_mediana)} sub="mediana" />
+        <Tile label="Pacientes por hora" value={fmtNum(t.consultas_por_hora, 1)} />
+        <Tile label="Interrupciones" value={fmtNum(t.interrupciones)} sub="vueltas a un paciente ya abierto" />
+        <Tile label="Revisitas de pantalla" value={fmtNum(t.revisitas_sap)} sub="idas y vueltas en SAP" />
+        <Tile label="Carga en SAP" value={fmtPct(t.carga_admin_pct)} sub="del tiempo activo" />
+        <Tile label="Copiar · pegar" value={`${fmtNum(t.copias)} · ${fmtNum(t.pegados)}`} />
+        <Tile label="Correcciones" value={fmtNum(t.correcciones)} sub="Backspace + Supr" />
+        <Tile label="Tab · Enter" value={`${fmtNum(t.tabs)} · ${fmtNum(t.enters)}`} />
+        <Tile label="Guardados (Ctrl+S)" value={fmtNum(t.guardados)} />
       </div>
 
       <Seccion titulo="Línea de tiempo" sub="Minutos activos en cada tramo de 5 minutos, por aplicación. Las marcas de abajo son pacientes abiertos en SAP.">

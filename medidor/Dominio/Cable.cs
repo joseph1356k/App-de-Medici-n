@@ -40,6 +40,12 @@ public static class Cable
         ["context_switches"] = m.CambiosDeContexto,
         ["sap_roundtrips"] = m.SapRoundtrips,
         ["sap_wait_ms"] = m.SapEsperaMs,
+        ["tabs"] = m.Tabs,
+        ["enters"] = m.Enters,
+        ["correcciones"] = m.Correcciones,
+        ["copias"] = m.Copias,
+        ["pegados"] = m.Pegados,
+        ["guardados"] = m.Guardados,
     });
 
     public static string Evento(string kind, DateTimeOffset occurredAt, Guid? shiftId, string? encounterKey,

@@ -3,13 +3,15 @@ namespace Medidor;
 /// <summary>Lo que un tick aporta a su cubeta. Solo cantidades: aquí no cabe un título, un código
 /// de tecla ni un valor de campo — el tipo mismo es la lista blanca.</summary>
 public sealed record Aportes(int ForegroundMs, int ActiveMs, int TypingMs, int Teclas, int Clics, int Scroll,
-    int CambiosDeContexto, int SapRoundtrips, int SapEsperaMs);
+    int CambiosDeContexto, int SapRoundtrips, int SapEsperaMs,
+    int Tabs = 0, int Enters = 0, int Correcciones = 0, int Copias = 0, int Pegados = 0, int Guardados = 0);
 
 /// <summary>Una fila de la serie temporal: una cubeta de 15 s partida por contexto
 /// (app · superficie · encounter), con su orden de aparición dentro de la cubeta.</summary>
 public sealed record Muestra(DateTimeOffset BucketStart, int BucketMs, int Seq, string App, string? Surface, string? EncounterKey,
     int ForegroundMs, int ActiveMs, int TypingMs, int Teclas, int Clics, int Scroll,
-    int CambiosDeContexto, int SapRoundtrips, int SapEsperaMs);
+    int CambiosDeContexto, int SapRoundtrips, int SapEsperaMs,
+    int Tabs = 0, int Enters = 0, int Correcciones = 0, int Copias = 0, int Pegados = 0, int Guardados = 0);
 
 /// <summary>
 /// LA SERIE TEMPORAL DEL MEDIDOR: acumula ticks en cubetas de 15 s alineadas al reloj de pared, y
@@ -28,6 +30,7 @@ public sealed class Cubetas
         public string? Surface;
         public string? EncounterKey;
         public int ForegroundMs, ActiveMs, TypingMs, Teclas, Clics, Scroll, CambiosDeContexto, SapRoundtrips, SapEsperaMs;
+        public int Tabs, Enters, Correcciones, Copias, Pegados, Guardados;
     }
 
     private readonly SortedDictionary<long, List<Parte>> _cubetas = new();
@@ -55,6 +58,12 @@ public sealed class Cubetas
         parte.CambiosDeContexto += aportes.CambiosDeContexto;
         parte.SapRoundtrips += aportes.SapRoundtrips;
         parte.SapEsperaMs += aportes.SapEsperaMs;
+        parte.Tabs += aportes.Tabs;
+        parte.Enters += aportes.Enters;
+        parte.Correcciones += aportes.Correcciones;
+        parte.Copias += aportes.Copias;
+        parte.Pegados += aportes.Pegados;
+        parte.Guardados += aportes.Guardados;
     }
 
     /// <summary>Entrega y suelta las cubetas ya COMPLETAS (su ventana terminó antes de
@@ -84,7 +93,8 @@ public sealed class Cubetas
                     DateTimeOffset.FromUnixTimeMilliseconds(inicio), p.ForegroundMs, seq,
                     p.App, p.Surface, p.EncounterKey,
                     p.ForegroundMs, p.ActiveMs, p.TypingMs, p.Teclas, p.Clics, p.Scroll,
-                    p.CambiosDeContexto, p.SapRoundtrips, p.SapEsperaMs));
+                    p.CambiosDeContexto, p.SapRoundtrips, p.SapEsperaMs,
+                    p.Tabs, p.Enters, p.Correcciones, p.Copias, p.Pegados, p.Guardados));
             }
             _cubetas.Remove(inicio);
         }

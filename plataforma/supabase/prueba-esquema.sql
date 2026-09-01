@@ -32,4 +32,6 @@ select m.shift_id, m.doctor_id is not null as con_medico, m.phase, s.end_reason,
        sap_wait_ms_total, ready_ms_p50, ready_ms_p95, pantallas_distintas, visitas, cobertura_pct, calidad_ok, active_ms_por_app
 from shift_summary m join shifts s using (shift_id);
 select end_reason, sap_user_seen, huecos_ms, ticks_sap_saltados_busy from shifts;
+select interrupciones, revisitas_sap, consultas_por_hora, consulta_ms_mediana/60000 as consulta_min, entre_consultas_ms_mediana/60000 as entre_min, carga_admin_pct, algo_version
+from shift_summary;
 rollback;

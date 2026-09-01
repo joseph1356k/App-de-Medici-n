@@ -11,6 +11,24 @@
 Vale cualquier otro Postgres (Neon, Vercel Postgres, uno propio): el esquema es Postgres estándar. En
 local: `PGHOST=... npm run db:aplicar`.
 
+**Opción B — sin proyecto nuevo (el plan gratis de Supabase permite 2 activos):** el medidor vive en
+un **esquema aparte** (`medicion`) dentro de un proyecto que ya exista, con su propio usuario. Nada
+del proyecto original se toca: distinto esquema, distinto rol, y la API pública de Supabase no expone
+ese esquema. En el SQL Editor del proyecto:
+
+```sql
+create role medicion_app with login password 'UNA-CLAVE-LARGA' nosuperuser nocreatedb nocreaterole noinherit;
+grant medicion_app to postgres;
+create schema medicion authorization medicion_app;
+grant usage on schema extensions to medicion_app;
+alter role medicion_app set search_path = medicion, public, extensions;
+```
+
+Después, `set search_path to medicion, public, extensions;` + el contenido de `schema.sql` + al final
+el bloque de dueño (está en `supabase/migracion-esquema-aparte.sql`, listo para pegar). La
+`DATABASE_URL` queda `postgres://medicion_app.<ref>:<clave>@aws-0-<region>.pooler.supabase.com:6543/postgres`
+(si el proyecto está en el pooler `aws-1-…`, la plataforma lo prueba sola).
+
 ## 2. Plataforma (Vercel)
 
 1. [vercel.com](https://vercel.com) → *Add New → Project* → importa este repositorio.

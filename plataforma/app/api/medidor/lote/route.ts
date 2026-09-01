@@ -56,7 +56,7 @@ export async function POST(req: Request) {
   accepted.samples = await insertar("samples", muestras, rejected, () =>
     sql`insert into samples ${sql(muestras, "device_id", "shift_id", "bucket_start", "bucket_ms", "seq", "app", "surface",
       "encounter_key", "foreground_ms", "active_ms", "typing_ms", "keystrokes", "clicks", "scroll_ticks", "context_switches",
-      "sap_roundtrips", "sap_wait_ms")} on conflict do nothing`);
+      "sap_roundtrips", "sap_wait_ms", "tabs", "enters", "correcciones", "copias", "pegados", "guardados")} on conflict do nothing`);
   for (const m of muestras) tocados.add(m.shift_id);
 
   const eventos = construir("events", cap<Crudo>(body.events, LIMITES.events), (r) => filaEvento(deviceId, r), rejected);

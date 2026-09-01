@@ -74,6 +74,11 @@ describe("idempotencia y robustez del lote", () => {
     expect(() => filaTurno({ shift_id: SHIFT, started_at: "cuando sea" })).toThrow(/started_at/);
   });
 
+  it("los contadores de teclas de control viajan como cantidades y faltantes valen 0", () => {
+    const m = filaMuestra(DEV, { shift_id: SHIFT, bucket_start: "2026-09-01T13:00:00Z", app: "sap", tabs: 3, pegados: 1, guardados: 2 });
+    expect([m.tabs, m.enters, m.correcciones, m.copias, m.pegados, m.guardados]).toEqual([3, 0, 0, 0, 1, 2]);
+  });
+
   it("la app se normaliza a minúscula y un nombre raro se rechaza", () => {
     expect(filaMuestra(DEV, { shift_id: SHIFT, bucket_start: "2026-09-01T13:00:00Z", app: "SAP" }).app).toBe("sap");
     expect(() => filaMuestra(DEV, { shift_id: SHIFT, bucket_start: "2026-09-01T13:00:00Z", app: "Juan Pérez.exe" })).toThrow(/app/);

@@ -51,6 +51,13 @@ persona o una IA entienda cada campo sin más contexto.
 | `post_atencion_ms`, `cola_post_turno_ms` | ver definiciones |
 | `sap_wait_ms_total`, `sap_roundtrips`, `ready_ms_p50`, `ready_ms_p95` | esperas y time-to-ready de SAP |
 | `pantallas_distintas`, `visitas` | pantallas SAP distintas; estadías |
+| `tabs`, `enters`, `correcciones`, `copias`, `pegados`, `guardados` | teclas de control (las únicas seis que se distinguen): Tab, Enter, Backspace+Supr, Ctrl+C, Ctrl+V, Ctrl+S |
+| `interrupciones` | vueltas a un paciente ya abierto en el turno (A→B→A) |
+| `revisitas_sap` | vueltas a una pantalla SAP ya visitada con el mismo paciente |
+| `consultas_por_hora` | pacientes distintos por hora de turno |
+| `consulta_ms_mediana` | duración de consulta en reloj de pared (primer → último toque del paciente) |
+| `entre_consultas_ms_mediana` | del último toque de un paciente al primero del siguiente: disponible para el próximo |
+| `carga_admin_pct` | % del tiempo activo que fue en SAP |
 | `cobertura_pct`, `calidad_ok` | calidad; `true` = comparable |
 | `active_ms_por_app` | `{app: ms}` |
 | `sap_user_seen`, `app_version` | login SAP del médico visto; versión del medidor |
@@ -62,7 +69,7 @@ persona o una IA entienda cada campo sin más contexto.
 `shift_id`, `device_id`, `doctor_id`, `phase`, `bucket_start` (inicio de la cubeta, alineada al reloj),
 `bucket_ms`, `seq` (segmento dentro de la cubeta al cambiar el contexto), `app`, `surface`,
 `encounter_key`, `foreground_ms`, `active_ms`, `typing_ms`, `keystrokes`, `clicks`, `scroll_ticks`,
-`context_switches`, `sap_roundtrips`, `sap_wait_ms`.
+`context_switches`, `sap_roundtrips`, `sap_wait_ms`, `tabs`, `enters`, `correcciones`, `copias`, `pegados`, `guardados`.
 
 ## `visitas_sap` — el recorrido por SAP
 

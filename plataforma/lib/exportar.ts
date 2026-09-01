@@ -13,10 +13,13 @@ export const COLUMNAS = {
   turnos: ["shift_id", "fecha_operativa", "phase", "doctor_id", "medico", "device_id", "pc", "pc_etiqueta", "started_at", "ended_at", "end_reason",
     "duracion_ms", "foreground_ms_total", "active_ms_total", "his_ms", "miracle_ms", "typing_ms", "keystrokes", "clicks", "scroll_ticks", "context_switches",
     "encounters", "encounter_active_ms_mediana", "post_atencion_ms", "cola_post_turno_ms", "sap_wait_ms_total", "sap_roundtrips", "ready_ms_p50", "ready_ms_p95",
-    "pantallas_distintas", "visitas", "cobertura_pct", "calidad_ok", "active_ms_por_app", "sap_user_seen", "app_version", "huecos_ms", "clock_jumps",
+    "pantallas_distintas", "visitas", "tabs", "enters", "correcciones", "copias", "pegados", "guardados",
+    "interrupciones", "revisitas_sap", "consultas_por_hora", "consulta_ms_mediana", "entre_consultas_ms_mediana", "carga_admin_pct",
+    "cobertura_pct", "calidad_ok", "active_ms_por_app", "sap_user_seen", "app_version", "huecos_ms", "clock_jumps",
     "spool_dropped", "hooks_degradados", "ticks_sap_saltados_busy", "algo_version"],
   muestras: ["shift_id", "device_id", "doctor_id", "phase", "bucket_start", "bucket_ms", "seq", "app", "surface", "encounter_key", "foreground_ms", "active_ms",
-    "typing_ms", "keystrokes", "clicks", "scroll_ticks", "context_switches", "sap_roundtrips", "sap_wait_ms"],
+    "typing_ms", "keystrokes", "clicks", "scroll_ticks", "context_switches", "sap_roundtrips", "sap_wait_ms",
+    "tabs", "enters", "correcciones", "copias", "pegados", "guardados"],
   visitas: ["shift_id", "device_id", "doctor_id", "phase", "encounter_key", "sid", "tcode", "dynpro", "surface", "entered_at", "left_at", "dwell_ms", "ready_ms",
     "sap_wait_ms", "roundtrips", "exit_to"],
   eventos: ["shift_id", "device_id", "occurred_at", "kind", "encounter_key", "detail"],
@@ -32,13 +35,17 @@ export function consulta(col: Coleccion, f: Filtros) {
       return sql`select m.shift_id, m.fecha_operativa::text as fecha_operativa, m.phase, m.doctor_id, r.display_name as medico, m.device_id, d.machine_name as pc, d.label as pc_etiqueta,
         m.started_at, m.ended_at, s.end_reason, m.duracion_ms, m.foreground_ms_total, m.active_ms_total, m.his_ms, m.miracle_ms, m.typing_ms, m.keystrokes, m.clicks,
         m.scroll_ticks, m.context_switches, m.encounters, m.encounter_active_ms_mediana, m.post_atencion_ms, m.cola_post_turno_ms, m.sap_wait_ms_total, m.sap_roundtrips,
-        m.ready_ms_p50, m.ready_ms_p95, m.pantallas_distintas, m.visitas, m.cobertura_pct, m.calidad_ok, m.active_ms_por_app, s.sap_user_seen, s.app_version,
+        m.ready_ms_p50, m.ready_ms_p95, m.pantallas_distintas, m.visitas,
+        m.tabs, m.enters, m.correcciones, m.copias, m.pegados, m.guardados,
+        m.interrupciones, m.revisitas_sap, m.consultas_por_hora, m.consulta_ms_mediana, m.entre_consultas_ms_mediana, m.carga_admin_pct,
+        m.cobertura_pct, m.calidad_ok, m.active_ms_por_app, s.sap_user_seen, s.app_version,
         s.huecos_ms, s.clock_jumps, s.spool_dropped, s.hooks_degradados, s.ticks_sap_saltados_busy, m.algo_version
         from shift_summary m join shifts s on s.shift_id = m.shift_id left join roster r on r.id = m.doctor_id left join devices d on d.id = m.device_id
         where ${filtroTurnos(f)} order by m.started_at`;
     case "muestras":
       return sql`select x.shift_id, x.device_id, s.doctor_id, s.phase, x.bucket_start, x.bucket_ms, x.seq, x.app, x.surface, x.encounter_key, x.foreground_ms, x.active_ms,
-        x.typing_ms, x.keystrokes, x.clicks, x.scroll_ticks, x.context_switches, x.sap_roundtrips, x.sap_wait_ms
+        x.typing_ms, x.keystrokes, x.clicks, x.scroll_ticks, x.context_switches, x.sap_roundtrips, x.sap_wait_ms,
+        x.tabs, x.enters, x.correcciones, x.copias, x.pegados, x.guardados
         from samples x join shifts s on s.shift_id = x.shift_id
         where x.shift_id in (${turnosFiltrados(f)}) order by x.bucket_start, x.seq`;
     case "visitas":

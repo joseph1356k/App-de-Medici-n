@@ -46,6 +46,7 @@ internal static class Contrato
         Prueba("20. la espera de SAP es la suma de sus round-trips: StartRequest abre, EndRequest cierra, y un cierre sin pareja no resta", LaEsperaEsLaSumaDeRoundtrips);
         Prueba("21. time-to-ready va de la llegada al primer EndRequest sin Busy; si nunca llega queda nulo, no cero", ReadyNuloNoCero);
         Prueba("22. cada fila del lote lleva el seq del spool con nombre propio (spool_seq), sin pisar el seq de la cubeta", ElSeqDelSpoolNoPisaElDeLaCubeta);
+        Prueba("23. del teclado solo se distinguen Tab, Enter, borrar, copiar, pegar y guardar; una letra es indistinguible de otra, y al lote viajan cantidades, jamás códigos", SoloTeclasDeControl);
 
         Console.WriteLine();
         Console.WriteLine(_fallos == 0
@@ -562,6 +563,39 @@ internal static class Contrato
         Debe(muestras.Select(m => m.GetProperty("seq").GetInt32()).OrderBy(x => x).SequenceEqual(new[] { 0, 1 }), "el seq de la cubeta (0 y 1) sigue intacto");
         Debe(eventos.Count == 1 && eventos[0].TryGetProperty("spool_seq", out _), "el evento lleva su spool_seq");
         Debe(!System.Text.RegularExpressions.Regex.IsMatch(lote, "\\{\"seq\":"), "ninguna fila abre con «seq»: el del spool ya no se llama así");
+    }
+
+    // ── El teclado (23) ──────────────────────────────────────────────────────
+
+    private static void SoloTeclasDeControl()
+    {
+        // Ninguna letra, número ni símbolo se distingue de otro: todas caen en Ninguna.
+        var letras = Enumerable.Range(0x30, 10).Concat(Enumerable.Range(0x41, 26)).Concat(new[] { 0x20, 0xBA, 0xBC, 0xBE, 0xBF, 0xDB, 0xDE });
+        Debe(letras.All(vk => TeclasDeControl.Clasificar(vk, false, false) == TeclaDeControl.Ninguna), "sin Ctrl, letras, números y símbolos son «Ninguna»");
+        Debe(letras.Where(vk => vk is not (TeclasDeControl.VK_C or TeclasDeControl.VK_V or TeclasDeControl.VK_S))
+                 .All(vk => TeclasDeControl.Clasificar(vk, true, false) == TeclaDeControl.Ninguna), "con Ctrl, solo C, V y S significan algo");
+
+        Debe(TeclasDeControl.Clasificar(TeclasDeControl.VK_TAB, false, false) == TeclaDeControl.Tab, "Tab");
+        Debe(TeclasDeControl.Clasificar(TeclasDeControl.VK_RETURN, false, false) == TeclaDeControl.Enter, "Enter");
+        Debe(TeclasDeControl.Clasificar(TeclasDeControl.VK_BACK, false, false) == TeclaDeControl.Correccion, "Backspace corrige");
+        Debe(TeclasDeControl.Clasificar(TeclasDeControl.VK_DELETE, false, false) == TeclaDeControl.Correccion, "Supr corrige");
+        Debe(TeclasDeControl.Clasificar(TeclasDeControl.VK_C, true, false) == TeclaDeControl.Copiar, "Ctrl+C copia");
+        Debe(TeclasDeControl.Clasificar(TeclasDeControl.VK_V, true, false) == TeclaDeControl.Pegar, "Ctrl+V pega");
+        Debe(TeclasDeControl.Clasificar(TeclasDeControl.VK_S, true, false) == TeclaDeControl.Guardar, "Ctrl+S guarda");
+        Debe(TeclasDeControl.Clasificar(TeclasDeControl.VK_INSERT, false, true) == TeclaDeControl.Pegar, "Mayús+Ins pega");
+        Debe(TeclasDeControl.Clasificar(TeclasDeControl.VK_C, false, false) == TeclaDeControl.Ninguna, "una C sola es una letra más");
+
+        // Y al lote solo viajan las cantidades: una muestra con teclas de control serializada no
+        // contiene ningún código de tecla ni ningún nombre de tecla.
+        var cubetas = new Cubetas();
+        var t0 = new DateTimeOffset(2026, 9, 1, 13, 0, 0, TimeSpan.Zero);
+        cubetas.Registrar(t0, new Superficie("sap", "sapgui://QAS/NV2000/P/0100"), null,
+            new Aportes(1000, 1000, 400, 12, 0, 0, 0, 0, 0, Tabs: 3, Enters: 1, Correcciones: 2, Copias: 1, Pegados: 1, Guardados: 1));
+        var m = cubetas.CosecharTodo().Single();
+        var json = Cable.Muestra(Guid.NewGuid(), m);
+        Debe(json.Contains("\"tabs\":3") && json.Contains("\"correcciones\":2") && json.Contains("\"pegados\":1") && json.Contains("\"guardados\":1"), "las cantidades viajan");
+        Debe(!json.Contains("vk", StringComparison.OrdinalIgnoreCase) && !json.Contains("0x") && !json.Contains("VK_"), "ningún código de tecla viaja");
+        Debe(m.Teclas == 12, "las teclas de control también cuentan como teclas");
     }
 
     // ── El arnés ─────────────────────────────────────────────────────────────

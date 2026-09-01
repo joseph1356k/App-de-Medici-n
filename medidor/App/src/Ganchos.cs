@@ -10,7 +10,8 @@ namespace Medidor.App;
 /// `UltimoInputHaceMs` es RELATIVO (ms desde ahora), no un timestamp absoluto: los ganchos y el
 /// orquestador tienen relojes monotónicos distintos, y restar timestamps entre relojes distintos no
 /// significa nada. El valor relativo sí es comparable en cualquier reloj.</summary>
-public sealed record ContadoresDeInput(int Clics, int Scroll, IReadOnlyList<long> InstantesDeTecla, long UltimoInputHaceMs);
+public sealed record ContadoresDeInput(int Clics, int Scroll, IReadOnlyList<long> InstantesDeTecla, long UltimoInputHaceMs,
+    int Tabs = 0, int Enters = 0, int Correcciones = 0, int Copias = 0, int Pegados = 0, int Guardados = 0);
 
 /// <summary>
 /// GANCHOS GLOBALES de ratón y teclado, siempre activos, con el patrón de ClickWatcher: el callback
@@ -27,7 +28,8 @@ public sealed class Ganchos : IDisposable
 {
     private const int WH_MOUSE_LL = 14, WH_KEYBOARD_LL = 13;
     private const int WM_LBUTTONDOWN = 0x0201, WM_MOUSEWHEEL = 0x020A;
-    private const int WM_KEYDOWN = 0x0100, WM_SYSKEYDOWN = 0x0104;
+    private const int WM_KEYDOWN = 0x0100, WM_KEYUP = 0x0101, WM_SYSKEYDOWN = 0x0104, WM_SYSKEYUP = 0x0105;
+    private const int VK_SHIFT = 0x10, VK_CONTROL = 0x11, VK_LSHIFT = 0xA0, VK_RSHIFT = 0xA1, VK_LCONTROL = 0xA2, VK_RCONTROL = 0xA3;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct MSLLHOOKSTRUCT { public int X, Y; public uint MouseData, Flags, Time; public IntPtr Extra; }
@@ -50,6 +52,8 @@ public sealed class Ganchos : IDisposable
     private IntPtr _mouseHook, _kbHook;
 
     private int _clics, _scroll;
+    private int _tabs, _enters, _correcciones, _copias, _pegados, _guardados;
+    private bool _ctrl, _shift;
     private readonly List<long> _teclas = new();
     private long _ultimoInputMono;
     private readonly object _candado = new();
@@ -93,8 +97,10 @@ public sealed class Ganchos : IDisposable
             }
 
             long ultimoHace = _ultimoInputMono == 0 ? UmbralGrande : Math.Max(0, ahora - _ultimoInputMono);
-            var r = new ContadoresDeInput(_clics, _scroll, _teclas.ToArray(), ultimoHace);
+            var r = new ContadoresDeInput(_clics, _scroll, _teclas.ToArray(), ultimoHace,
+                _tabs, _enters, _correcciones, _copias, _pegados, _guardados);
             _clics = 0; _scroll = 0; _teclas.Clear();
+            _tabs = 0; _enters = 0; _correcciones = 0; _copias = 0; _pegados = 0; _guardados = 0;
             return r;
         }
     }
@@ -118,10 +124,34 @@ public sealed class Ganchos : IDisposable
         if (code >= 0)
         {
             int msg = (int)wParam;
-            if (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN)
-                lock (_candado) { _teclas.Add(_reloj.ElapsedMilliseconds); Marca(); }
-            // Aquí NO se lee lParam->VkCode: no hace falta para contar, y leerlo sería el primer
-            // paso para guardarlo. La lista blanca de la privacidad empieza por no mirar.
+            bool abajo = msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN;
+            bool arriba = msg == WM_KEYUP || msg == WM_SYSKEYUP;
+
+            // El código de la tecla (KBDLLHOOKSTRUCT.vkCode) se lee para UNA sola cosa: pasar por la
+            // lista blanca de TeclasDeControl (Tab, Enter, borrar, copiar, pegar, guardar) y seguir el
+            // estado de Ctrl/Mayús. No se guarda, no se acumula, no sale de esta función. Cualquier
+            // letra, número o símbolo es «Ninguna» y es indistinguible de los demás (promesa 23).
+            int vk = Marshal.ReadInt32(lParam);
+            if (vk is VK_CONTROL or VK_LCONTROL or VK_RCONTROL) { if (abajo) _ctrl = true; else if (arriba) _ctrl = false; }
+            else if (vk is VK_SHIFT or VK_LSHIFT or VK_RSHIFT) { if (abajo) _shift = true; else if (arriba) _shift = false; }
+            else if (abajo)
+            {
+                var clase = TeclasDeControl.Clasificar(vk, _ctrl, _shift);
+                lock (_candado)
+                {
+                    _teclas.Add(_reloj.ElapsedMilliseconds);
+                    Marca();
+                    switch (clase)
+                    {
+                        case TeclaDeControl.Tab: _tabs++; break;
+                        case TeclaDeControl.Enter: _enters++; break;
+                        case TeclaDeControl.Correccion: _correcciones++; break;
+                        case TeclaDeControl.Copiar: _copias++; break;
+                        case TeclaDeControl.Pegar: _pegados++; break;
+                        case TeclaDeControl.Guardar: _guardados++; break;
+                    }
+                }
+            }
         }
         return CallNextHookEx(_kbHook, code, wParam, lParam);
     }

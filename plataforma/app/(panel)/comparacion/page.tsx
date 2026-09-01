@@ -2,7 +2,7 @@ import { Filtros } from "@/components/Filtros";
 import { Seccion, Vacio } from "@/components/ui";
 import { medicosParaFiltro, porFase, porMedicoYFase, type FilaFase } from "@/lib/consultas";
 import { leerFiltros, type Sp } from "@/lib/filtros";
-import { ETIQUETA_FASE, FASES, fmtMin, fmtNum, fmtSeg, reduccion } from "@/lib/formato";
+import { ETIQUETA_FASE, FASES, fmtMin, fmtNum, fmtPct, fmtSeg, reduccion } from "@/lib/formato";
 
 /**
  * COMPARACIÓN DE FASES: baseline vs Notes vs Notes+Operations, lado a lado. Es la
@@ -31,6 +31,18 @@ export default async function ComparacionPage({ searchParams }: { searchParams: 
     { clave: "espera_sap_med", label: "Espera de SAP", fmt: fmtSeg, menosEsMejor: true },
     { clave: "ready_p95_med", label: "Pantalla lista (p95)", fmt: fmtSeg, menosEsMejor: true },
     { clave: "pantallas_med", label: "Pantallas SAP distintas", fmt: fmtNum, menosEsMejor: true },
+    { clave: "consulta_med", label: "Duración de una consulta", fmt: fmtMin, menosEsMejor: true },
+    { clave: "entre_consultas_med", label: "Hasta el siguiente paciente", fmt: fmtMin, menosEsMejor: true },
+    { clave: "consultas_por_hora_med", label: "Pacientes por hora", fmt: (v) => fmtNum(v, 1), menosEsMejor: false },
+    { clave: "interrupciones_med", label: "Interrupciones (vueltas a un paciente)", fmt: fmtNum, menosEsMejor: true },
+    { clave: "revisitas_med", label: "Revisitas de pantalla en SAP", fmt: fmtNum, menosEsMejor: true },
+    { clave: "carga_admin_med", label: "Carga en SAP (% del activo)", fmt: fmtPct, menosEsMejor: true },
+    { clave: "copias_med", label: "Copiar", fmt: fmtNum, menosEsMejor: true },
+    { clave: "pegados_med", label: "Pegar", fmt: fmtNum, menosEsMejor: true },
+    { clave: "correcciones_med", label: "Correcciones (Backspace/Supr)", fmt: fmtNum, menosEsMejor: true },
+    { clave: "tabs_med", label: "Tab", fmt: fmtNum, menosEsMejor: true },
+    { clave: "enters_med", label: "Enter", fmt: fmtNum, menosEsMejor: true },
+    { clave: "guardados_med", label: "Guardados (Ctrl+S)", fmt: fmtNum, menosEsMejor: true },
   ];
   const val = (fase: string, clave: Clave): number | null => { const v = por[fase]?.[clave]; return v == null ? null : Number(v); };
   const ultimaConDatos = [...FASES].reverse().find((x) => x !== "baseline" && por[x]?.n > 0) ?? null;

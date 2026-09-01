@@ -84,6 +84,7 @@ export type FilaMuestra = {
   app: string; surface: string | null; encounter_key: string | null;
   foreground_ms: number; active_ms: number; typing_ms: number; keystrokes: number; clicks: number;
   scroll_ticks: number; context_switches: number; sap_roundtrips: number; sap_wait_ms: number;
+  tabs: number; enters: number; correcciones: number; copias: number; pegados: number; guardados: number;
 };
 
 export function filaMuestra(deviceId: string, r: Crudo): FilaMuestra {
@@ -103,6 +104,8 @@ export function filaMuestra(deviceId: string, r: Crudo): FilaMuestra {
     clicks: num(r.clicks), scroll_ticks: num(r.scroll_ticks),
     context_switches: num(r.context_switches),
     sap_roundtrips: num(r.sap_roundtrips), sap_wait_ms: num(r.sap_wait_ms),
+    tabs: num(r.tabs), enters: num(r.enters), correcciones: num(r.correcciones),
+    copias: num(r.copias), pegados: num(r.pegados), guardados: num(r.guardados),
   };
 }
 

@@ -32,7 +32,8 @@ icono en bandeja · sin instalar .NET                          API + panel web +
 
 **1. La base de datos** (5 min). Crea un proyecto en [Supabase](https://supabase.com) (gratis) → SQL Editor →
 pega [`plataforma/supabase/schema.sql`](plataforma/supabase/schema.sql) → Run. Copia la *connection string*
-del **Transaction pooler** (Settings → Database, puerto 6543).
+del **Transaction pooler** (Settings → Database, puerto 6543). Sin cupo para otro proyecto: un esquema
+aparte dentro de uno existente, ver [`docs/INSTALAR.md`](docs/INSTALAR.md) § Opción B.
 
 **2. La plataforma** (5 min). En [Vercel](https://vercel.com): *New Project* → importa este repo → *Root
 Directory* = `plataforma` → variables de entorno:
