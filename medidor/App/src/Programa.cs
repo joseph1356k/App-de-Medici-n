@@ -21,11 +21,23 @@ public sealed class Programa
     [STAThread]
     public static int Main()
     {
+        // DOS PAPELES EN UN SOLO ARCHIVO. Si este .exe se abrió desde cualquier sitio que no sea
+        // su carpeta de instalación —la carpeta de Descargas, el escritorio, una USB— hace de
+        // INSTALADOR: se copia a su sitio, se registra para arrancar con Windows, lanza a la copia
+        // y se va. Si ya está en su carpeta, hace de MEDIDOR y se pone a medir.
+        //
+        // Nace de tres intentos fallidos en el piloto del HGM (2026-09-02): un .exe que exige
+        // correr un .ps1 al lado se instala mal, porque el gesto natural sobre un .exe es el doble
+        // clic. Un instrumento que hay que desplegar en seis PCs de un hospital tiene que caber en
+        // un archivo y un doble clic. instalar.ps1 sigue existiendo y sigue funcionando.
+        if (Instalador.HayQueInstalar()) return Instalador.InstalarYSalir();
+
         using var mutex = new Mutex(true, "Local\\Medidor-instancia-unica", out bool primera);
         if (!primera) return 0; // ya hay un medidor corriendo en esta sesión
 
         Registro.Anota("medidor", $"arrancando v{VersionApp()} en {Environment.MachineName}");
         Registro.Podar(30);
+        Instalador.AsegurarArranqueConWindows();
         try { return new Programa().Correr(); }
         catch (Exception e)
         {
@@ -69,19 +81,20 @@ public sealed class Programa
         _ajustes = Ajustes.Cargar();
         if (!_ajustes.Completos)
         {
-            // Pasó en el primer PC del piloto (2026-09-02): alguien abrió Medidor.exe con doble
-            // clic, el gesto normal para un .exe, en vez de correr el instalador que deja escrito
-            // medidor.json. El mensaje genérico («corre instalar.ps1») no basta cuando la persona
-            // no sabe que ese archivo existe o cómo se llama en SU carpeta: aquí se lo busca y se
-            // nombra tal cual está, o se dice con todas las letras que no apareció ninguno.
-            var instalador = BuscarInstalador();
+            // Con la clave horneada al compilar, esto ya no le pasa a quien use el .exe oficial de
+            // la Release. Queda para el caso que sí puede darse: un .exe compilado desde el repo
+            // sin -p:MedidorClavePorDefecto, donde a propósito no hay ninguna credencial. El
+            // mensaje da las DOS salidas — decir solo «falta configuración» manda a la persona a
+            // buscar un archivo que no sabe crear (pasó tres veces en el piloto del HGM).
             Win32.MessageBoxW(IntPtr.Zero,
-                "Este programa (Medidor.exe) no se abre así, directamente.\n\n"
-                + (instalador != null
-                    ? $"En esta misma carpeta hay un instalador — ciérrate esta ventana y haz doble clic en:\n\n{Path.GetFileName(instalador)}\n\n(si Windows lo bloquea: clic derecho → Ejecutar con PowerShell)"
-                    : "Falta el instalador (un archivo .ps1) en esta carpeta. Pide el paquete completo — Medidor.exe solo, sin él, no se puede configurar.")
-                + $"\n\nRuta donde debería quedar la configuración:\n{Rutas.ArchivoDeAjustes}",
-                "Medidor — falta instalar", Win32.MB_OK | Win32.MB_ICONERROR | Win32.MB_TOPMOST);
+                "A esta copia del medidor le falta la clave del servidor.\n\n"
+                + "Pasa cuando el programa se compila desde el código en vez de descargarse ya listo.\n\n"
+                + "Dos formas de arreglarlo:\n"
+                + "   1. Descarga el Medidor.exe oficial, que ya trae la clave dentro.\n"
+                + "   2. O corre instalar.ps1 pasándole el servidor y la clave.\n\n"
+                + $"Servidor: {_ajustes.Servidor ?? "(ninguno)"}\n"
+                + $"Configuración: {Rutas.ArchivoDeAjustes}",
+                "Medidor — falta la clave", Win32.MB_OK | Win32.MB_ICONERROR | Win32.MB_TOPMOST);
             return 2;
         }
         _cliente = new ClienteServidor(_ajustes.Servidor!, _ajustes.Clave!, VersionApp());
@@ -420,19 +433,6 @@ public sealed class Programa
 
     private static string VersionApp()
         => typeof(Programa).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
-
-    /// <summary>El script de instalación junto al .exe, si lo hay — buscado por lo que tiene en
-    /// común (empieza por "instal", termina en .ps1), no por un nombre fijo: el paquete que se
-    /// entrega a cada hospital puede renombrarlo (p. ej. INSTALAR-EN-ESTE-PC.ps1).</summary>
-    private static string? BuscarInstalador()
-    {
-        try
-        {
-            return Directory.EnumerateFiles(AppContext.BaseDirectory, "*.ps1")
-                .FirstOrDefault(f => Path.GetFileName(f).StartsWith("instal", StringComparison.OrdinalIgnoreCase));
-        }
-        catch { return null; }
-    }
 
     // ── Apagado ──────────────────────────────────────────────────────────────
 

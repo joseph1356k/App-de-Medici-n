@@ -48,34 +48,49 @@ el bloque de dueño (está en `supabase/migracion-esquema-aparte.sql`, listo par
 
 ## 3. El `.exe` en cada PC
 
-### Conseguir `Medidor.exe`
+### Instalar: descargar y doble clic (30 segundos, sin administrador)
 
-- **Descarga directa** (lo normal): [`Medidor.exe`](../../releases/latest/download/Medidor.exe) y
-  [`instalar.ps1`](../../releases/latest/download/instalar.ps1) de la
-  [última versión publicada](../../releases/latest). Sin sesión de GitHub, sin descomprimir nada.
-- **Desde Actions**: cada corrida verde deja el artefacto **`Medidor-win-x64`** (un zip), útil para
-  probar un cambio antes de publicarlo como versión.
-- **O compilarlo** (en Windows, Linux o Mac con el SDK de .NET 8):
-  ```
-  dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o out medidor/App/App.csproj
-  ```
-  Sale `out/Medidor.exe` (~70 MB: lleva el runtime dentro, el PC no necesita .NET).
+1. Descarga [`Medidor.exe`](../../releases/latest/download/Medidor.exe).
+2. **Doble clic.**
+3. Sale un aviso de que quedó instalado. Ya está midiendo.
 
-### Instalar (sin administrador)
+El `.exe` se instala a sí mismo: se copia a `%LOCALAPPDATA%\Programs\Medidor`, se registra para
+arrancar con la sesión de Windows y arranca. Trae dentro la dirección del servidor y la clave, así
+que no hay nada que teclear ni ningún archivo que acompañe. El que descargaste ya se puede borrar.
 
-En el PC, en PowerShell, en la carpeta con `Medidor.exe` e `instalar.ps1`:
+Se registra solo en el servidor en su primer arranque, por nombre de máquina: reinstalar no duplica
+el equipo en el panel.
+
+**Actualizar** es lo mismo: descargar el nuevo y doble clic. Detiene la versión vieja, se reemplaza y
+sigue. La identidad del equipo, el secreto y los datos pendientes de enviar se conservan.
+
+**Quitar**: [`desinstalar.ps1`](../../releases/latest/download/desinstalar.ps1), clic derecho →
+*Ejecutar con PowerShell*.
+
+### Casos que necesitan `instalar.ps1`
+
+Solo dos: apuntar un PC a **otro servidor**, o usar un `.exe` **compilado desde el código** (que sale
+sin clave a propósito).
 
 ```powershell
-.\instalar.ps1 -Servidor "https://TU-PROYECTO.vercel.app" -Clave "LA_MEDIDOR_API_KEY"
+.\instalar.ps1 -Servidor "https://otro-servidor" -Clave "la-clave"
 ```
 
 Si PowerShell bloquea el script: `powershell -ExecutionPolicy Bypass -File .\instalar.ps1 -Servidor ... -Clave ...`.
 
-Qué hace: copia el .exe a `%LOCALAPPDATA%\Programs\Medidor`, escribe `%APPDATA%\Medidor\medidor.json`
-con servidor y clave, lo registra para arrancar con la sesión de Windows y lo arranca. El PC se registra
-solo en el servidor en el primer arranque (por nombre de máquina; reinstalar no duplica).
+### Compilarlo tú mismo
 
-Quitar: `.\desinstalar.ps1`.
+```
+dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true \
+  -p:MedidorClavePorDefecto=LA_CLAVE -o salida medidor/App/App.csproj
+```
+
+Sale `salida/Medidor.exe` (~70 MB: lleva el runtime dentro, el PC no necesita .NET). Sin
+`-p:MedidorClavePorDefecto` el `.exe` sale **sin clave**, a propósito — el repositorio no contiene
+ninguna credencial. Ese `.exe` funciona igual, pero hay que dársela con `instalar.ps1`.
+
+En GitHub la clave vive como secreto del repositorio (`MEDIDOR_CLAVE`, en *Settings → Secrets and
+variables → Actions*) y el CI la inyecta al publicar cada versión.
 
 ### El icono
 

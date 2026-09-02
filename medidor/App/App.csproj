@@ -33,7 +33,21 @@
          tener .NET instalado. La librería nativa de SQLite se extrae sola al arrancar. -->
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <DebugType>embedded</DebugType>
+
+    <!--
+      LA CLAVE DEL SERVIDOR, HORNEADA AL COMPILAR — nunca escrita en el repo. VACÍA por defecto,
+      así que quien clone esto no obtiene ninguna credencial; el CI la inyecta desde un secreto:
+          dotnet publish ... -p:MedidorClavePorDefecto=xxx
+      Es lo que permite que el .exe descargado se instale con un doble clic, sin pedirle a nadie
+      que teclee una clave de cuarenta caracteres en seis PCs de un hospital. Mismo mecanismo que
+      GraphDefaultApiKey en windows-graph, y por la misma razón.
+    -->
+    <MedidorClavePorDefecto Condition="'$(MedidorClavePorDefecto)' == ''"></MedidorClavePorDefecto>
   </PropertyGroup>
+
+  <ItemGroup>
+    <AssemblyMetadata Include="MedidorClavePorDefecto" Value="$(MedidorClavePorDefecto)" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Dominio\Dominio.csproj" />

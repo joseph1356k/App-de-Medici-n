@@ -30,7 +30,12 @@ jobs:
       # No se publica nada que no pase el contrato del instrumento.
       - run: dotnet run -c Release --project medidor/Contrato
 
-      - run: dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o salida medidor/App/App.csproj
+      # La clave del servidor entra AQUÍ, desde el secreto del repo, nunca desde el código. Es lo
+      # que hace que el .exe publicado se instale con un doble clic, sin teclear nada. Si el
+      # secreto no está puesto el build NO falla: sale un .exe sin clave, que lo dice al abrirse.
+      - run: dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:MedidorClavePorDefecto="$MEDIDOR_CLAVE" -o salida medidor/App/App.csproj
+        env:
+          MEDIDOR_CLAVE: ${{ secrets.MEDIDOR_CLAVE }}
       - run: |
           rm -f salida/*.pdb
           cp medidor/instalar.ps1 medidor/desinstalar.ps1 salida/
@@ -44,11 +49,10 @@ jobs:
           gh release create "$TAG" --target "$GITHUB_SHA" \
             salida/Medidor.exe salida/instalar.ps1 salida/desinstalar.ps1 \
             --title "Medidor $TAG" \
-            --notes "Descarga \`Medidor.exe\` y \`instalar.ps1\` en la misma carpeta, y en PowerShell:
+            --notes "**Descarga \`Medidor.exe\`, haz doble clic, y ya.** Se instala solo, arranca con Windows y empieza a medir.
 
-          \`\`\`powershell
-          .\\instalar.ps1 -Servidor \"https://TU-SERVIDOR\" -Clave \"TU_CLAVE\"
-          \`\`\`
+          No necesita permisos de administrador ni tener .NET instalado. Aparece un círculo junto al reloj de Windows: ámbar = falta elegir el médico, verde = midiendo.
 
-          No necesita permisos de administrador ni tener .NET instalado.
+          Para quitarlo, \`desinstalar.ps1\`. Para apuntar a otro servidor, \`instalar.ps1 -Servidor ... -Clave ...\`.
+
           Pasos completos en [docs/INSTALAR.md](https://github.com/joseph1356k/App-de-Medici-n/blob/main/docs/INSTALAR.md)."

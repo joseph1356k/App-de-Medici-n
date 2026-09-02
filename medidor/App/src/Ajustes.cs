@@ -1,12 +1,20 @@
+using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace Medidor.App;
 
 /// <summary>
-/// LO ÚNICO QUE HAY QUE CONFIGURAR EN EL PC: a qué servidor hablar y con qué clave. Vive en
-/// <c>medidor.json</c>, primero en %APPDATA%\Medidor (lo escribe instalar.ps1) y si no, al lado
-/// del .exe. Las variables de entorno MEDIDOR_SERVIDOR / MEDIDOR_CLAVE pisan al archivo.
+/// A QUÉ SERVIDOR HABLA EL MEDIDOR Y CON QUÉ CLAVE. Por orden de prioridad:
+///   1. <c>medidor.json</c> — en %APPDATA%\Medidor (lo escribe instalar.ps1) o junto al .exe.
+///      Es la vía para apuntar un PC a OTRO servidor sin recompilar nada.
+///   2. las variables de entorno MEDIDOR_SERVIDOR / MEDIDOR_CLAVE.
+///   3. lo horneado al compilar: el servidor (una URL pública, aquí abajo) y la clave, que el CI
+///      inyecta desde un secreto y NUNCA está en el repo (ver App.csproj).
+///
+/// El punto 3 es lo que hace que el .exe descargado funcione con un doble clic. Sin él, instalar
+/// en seis PCs de un hospital obligaba a teclear una clave de cuarenta caracteres en cada uno, y
+/// en el piloto del HGM eso se cayó tres veces seguidas antes de existir.
 ///
 /// La CONFIG DE MEDICIÓN (qué procesos son qué app, reglas de extracción, cadencias) NO se
 /// configura en el PC: llega del servidor al registrarse y se refresca sola. Cambiar una regla
@@ -14,6 +22,10 @@ namespace Medidor.App;
 /// </summary>
 public sealed class Ajustes
 {
+    /// <summary>El servidor de esta instalación. No es un secreto —es una web pública— así que
+    /// vive aquí y no en un secreto del CI: hornearlo evita un paso manual por PC.</summary>
+    private const string ServidorPorDefecto = "https://medicion.vercel.app";
+
     [JsonPropertyName("servidor")] public string? Servidor { get; set; }
     [JsonPropertyName("clave")] public string? Clave { get; set; }
 
@@ -37,7 +49,21 @@ public sealed class Ajustes
         var envClave = Environment.GetEnvironmentVariable("MEDIDOR_CLAVE");
         if (!string.IsNullOrWhiteSpace(envServidor)) a.Servidor = envServidor;
         if (!string.IsNullOrWhiteSpace(envClave)) a.Clave = envClave;
+
+        // Lo horneado va al final: solo rellena lo que nadie más dijo.
+        if (string.IsNullOrWhiteSpace(a.Servidor)) a.Servidor = ServidorPorDefecto;
+        if (string.IsNullOrWhiteSpace(a.Clave)) a.Clave = ClaveHorneada();
         return a;
+    }
+
+    /// <summary>La clave que el CI metió en este build, o vacía si se compiló sin ella (lo que
+    /// pasa en cualquier clon del repo: ahí no hay ninguna credencial que encontrar).</summary>
+    private static string? ClaveHorneada()
+    {
+        var v = typeof(Ajustes).Assembly
+            .GetCustomAttributes<AssemblyMetadataAttribute>()
+            .FirstOrDefault(m => m.Key == "MedidorClavePorDefecto")?.Value?.Trim();
+        return string.IsNullOrWhiteSpace(v) ? null : v;
     }
 }
 

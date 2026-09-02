@@ -25,7 +25,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with: { dotnet-version: "8.0.x" }
-      - run: dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o out/medidor medidor/App/App.csproj
+      - run: dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:MedidorClavePorDefecto="$MEDIDOR_CLAVE" -o out/medidor medidor/App/App.csproj
+        env:
+          MEDIDOR_CLAVE: ${{ secrets.MEDIDOR_CLAVE }}
       - run: cp medidor/instalar.ps1 medidor/desinstalar.ps1 out/medidor/
       - uses: actions/upload-artifact@v4
         with:

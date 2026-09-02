@@ -46,16 +46,16 @@ Directory* = `plataforma` → variables de entorno:
 Deploy. Abre la URL y ve a **Configuración** para escribir los nombres de los médicos (y sus usuarios
 de SAP si los sabes). El panel **no pide contraseña**: quien tenga la dirección entra y puede editar.
 
-**3. Los PCs** (2 min por PC, sin administrador). Descarga [`Medidor.exe`](../../releases/latest/download/Medidor.exe)
-e [`instalar.ps1`](../../releases/latest/download/instalar.ps1) de la [última versión](../../releases/latest)
-en la misma carpeta, y en PowerShell:
+**3. Los PCs** (30 segundos por PC, sin administrador). Descarga
+[`Medidor.exe`](../../releases/latest/download/Medidor.exe) y **haz doble clic**. Se copia solo a su
+sitio, queda arrancando con Windows y empieza a medir. Nada más: ni descomprimir, ni scripts, ni
+teclear claves.
 
-```powershell
-.\instalar.ps1 -Servidor "https://TU-PROYECTO.vercel.app" -Clave "LA_MEDIDOR_API_KEY"
-```
+Aparece un círculo junto al reloj de Windows: **ámbar** = falta elegir el médico (clic en él),
+**verde** = midiendo, **gris** = pausado. El PC aparece en **Dispositivos** en su primer latido.
 
-Aparece un círculo en la bandeja: **ámbar** = midiendo sin médico (clic → elige tu nombre), **verde** =
-midiendo, **gris** = pausado. El PC aparece en **Dispositivos** en su primer latido (un minuto).
+Para quitarlo, [`desinstalar.ps1`](../../releases/latest/download/desinstalar.ps1). Para apuntar un PC
+a otro servidor, `instalar.ps1 -Servidor "https://otro" -Clave "otra"`.
 
 Detalles, requisitos de SAP y diagnóstico: [`docs/INSTALAR.md`](docs/INSTALAR.md).
 
