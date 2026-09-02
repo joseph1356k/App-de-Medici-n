@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { ajustesDelPanel, faseHoy } from "@/lib/consultas";
 import { ETIQUETA_FASE } from "@/lib/formato";
-import { salir } from "@/app/entrar/actions";
 
 export const dynamic = "force-dynamic";
 
@@ -39,7 +38,6 @@ export default async function PanelLayout({ children }: { children: React.ReactN
               <Link key={n.href} href={n.href} className="rounded-lg px-3 py-1.5 text-secondary hover:bg-plane hover:text-ink">{n.texto}</Link>
             ))}
           </nav>
-          <form action={salir} className="ml-auto"><button className="text-xs text-muted hover:text-ink">Salir</button></form>
         </div>
       </header>
       <main className="mx-auto max-w-7xl space-y-6 px-4 py-6">

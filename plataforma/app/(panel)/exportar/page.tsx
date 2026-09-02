@@ -42,9 +42,9 @@ export default async function ExportarPage({ searchParams }: { searchParams: Pro
         ))}
       </div>
 
-      <Seccion titulo="Para usar los datos con una IA" sub="Una URL de exportación admite ?clave=CONTRASEÑA_DEL_PANEL en vez de la cookie, para pegarla en una herramienta (ChatGPT, Claude, un notebook) sin iniciar sesión. Trátala como una contraseña.">
+      <Seccion titulo="Para usar los datos con una IA" sub="Estas direcciones son públicas: se pegan tal cual en ChatGPT, Claude o un notebook, sin credenciales.">
         <ol className="list-decimal space-y-1 pl-5 text-sm text-secondary">
-          <li>Descarga <code>dataset.json</code> del rango que te interese (o pásale la URL con <code>&clave=…</code> a la herramienta).</li>
+          <li>Descarga <code>dataset.json</code> del rango que te interese, o pégale la URL directamente a la herramienta.</li>
           <li>El bloque <code>_leeme</code> del archivo explica cada campo; no hace falta más contexto. Si la herramienta prefiere tablas, usa los CSV.</li>
           <li>Pregunta, por ejemplo: «Compara el tiempo activo por paciente y el trabajo post-atención entre baseline y notes, solo turnos con calidad_ok, por médico».</li>
         </ol>

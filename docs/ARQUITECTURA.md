@@ -64,8 +64,10 @@ solo tras el 200; el tope descarta lo más viejo **contando** cada descarte (y e
 no comparable). Una fila que el servidor rechaza sale del spool en vez de atascar la cola para siempre.
 
 **Un Postgres, sin service-role en el panel.** La API escribe con `DATABASE_URL`; RLS activado sin
-políticas por si el Postgres es Supabase (la REST pública no puede leer). El panel se protege con una
-contraseña y una cookie HMAC; las exportaciones aceptan `?clave=` para pegarlas en una herramienta.
+políticas por si el Postgres es Supabase (la REST pública no puede leer). **El panel es público, sin
+login** (decisión del dueño, 2026-09-02): no expone dato de paciente, pero sí permite escribir
+configuración, así que quien tenga la dirección puede cambiar el instrumento. Lo que sigue protegido
+con `X-API-Key` es la ingesta: un turno falso contamina un baseline que no se puede repetir.
 
 **Resumen al instante.** El lote recalcula `shift_summary` de los turnos tocados: el panel va a un
 minuto del terreno sin cron. El cron diario solo recoge rezagados. `algo_version` permite recomputar

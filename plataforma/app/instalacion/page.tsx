@@ -38,7 +38,6 @@ export default async function InstalacionPage() {
   const vars: Estado[] = [
     { nombre: "DATABASE_URL", ok: !!process.env.DATABASE_URL, para: "dónde se guardan los datos (Postgres/Supabase)" },
     { nombre: "MEDIDOR_API_KEY", ok: !!process.env.MEDIDOR_API_KEY, para: "la clave con la que los PCs envían sus datos" },
-    { nombre: "PANEL_PASSWORD", ok: !!process.env.PANEL_PASSWORD, para: "la contraseña para entrar a este panel" },
   ];
   const faltan = vars.filter((v) => !v.ok);
   const listo = faltan.length === 0 && base.ok;
@@ -55,12 +54,12 @@ export default async function InstalacionPage() {
 
         {listo ? (
           <p className="text-sm text-secondary">
-            Todo en su sitio. <a href="/entrar" className="text-accent underline">Entrar al panel →</a>
+            Todo en su sitio. <a href="/" className="text-accent underline">Ir al panel →</a>
           </p>
         ) : (
           <p className="mb-5 text-sm text-secondary">
             La plataforma está desplegada, pero todavía no sabe dónde guardar los datos ni con qué
-            contraseña dejarte entrar. Eso se arregla en un sitio y no se vuelve a tocar.
+            clave le hablan los PCs. Eso se arregla en un sitio y no se vuelve a tocar.
           </p>
         )}
 

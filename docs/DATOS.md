@@ -105,4 +105,4 @@ cerrada: `reason`, `ms`, `count`, `user`, `rule`, `version`…; nunca texto libr
 | `/api/export/esquema.json` | este diccionario |
 
 Filtros en la URL: `rango=hoy|7d|30d|90d|todo` o `desde=YYYY-MM-DD&hasta=YYYY-MM-DD`, `fase=`, `medico=<uuid>`,
-`dispositivo=<uuid>`, `incluir_mala=1`. Acceso: cookie del panel o `clave=CONTRASEÑA_DEL_PANEL`.
+`dispositivo=<uuid>`, `incluir_mala=1`. Sin credenciales: el panel y sus exportaciones son públicos.

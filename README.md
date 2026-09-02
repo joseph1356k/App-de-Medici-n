@@ -42,10 +42,9 @@ Directory* = `plataforma` → variables de entorno:
 |---|---|
 | `DATABASE_URL` | la connection string del paso 1 |
 | `MEDIDOR_API_KEY` | una clave larga y aleatoria (la usarán los PCs) |
-| `PANEL_PASSWORD` | la contraseña del panel web |
 
-Deploy. Abre la URL, entra con la contraseña, ve a **Configuración** y escribe los nombres de los
-médicos (y sus usuarios de SAP si los sabes).
+Deploy. Abre la URL y ve a **Configuración** para escribir los nombres de los médicos (y sus usuarios
+de SAP si los sabes). El panel **no pide contraseña**: quien tenga la dirección entra y puede editar.
 
 **3. Los PCs** (2 min por PC, sin administrador). Descarga `Medidor.exe` (artefacto `Medidor-win-x64` de
 la última corrida de [Actions](../../actions), o `dotnet publish -c Release -r win-x64 --self-contained
@@ -75,8 +74,8 @@ Detalles, requisitos de SAP y diagnóstico: [`docs/INSTALAR.md`](docs/INSTALAR.m
 
 `/api/export/dataset.json?rango=30d` devuelve un solo JSON con un bloque `_leeme` (qué es cada campo, unidades,
 cómo comparar) + fases + médicos + dispositivos + turnos + visitas SAP + eventos. También CSV/JSON/NDJSON por
-colección y `esquema.json` con el diccionario. Con `&clave=CONTRASEÑA` se puede pegar la URL en una
-herramienta sin iniciar sesión. Diccionario en [`docs/DATOS.md`](docs/DATOS.md).
+colección y `esquema.json` con el diccionario. Como el panel no tiene login, la URL se pega tal cual
+en una herramienta. Diccionario en [`docs/DATOS.md`](docs/DATOS.md).
 
 ## Estado
 

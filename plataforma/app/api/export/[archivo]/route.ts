@@ -1,6 +1,6 @@
 // GET /api/export/<coleccion>.<csv|json|ndjson> · /api/export/dataset.json · /api/export/esquema.json
 // Con los mismos filtros de la URL que el panel (rango, fase, medico, dispositivo,
-// incluir_mala). La barrera (cookie o ?clave=) la pone el middleware.
+// incluir_mala). Sin barrera: el panel es público (ver middleware.ts).
 import { NextResponse } from "next/server";
 import { leerFiltros, type Sp } from "@/lib/filtros";
 import { DICCIONARIO } from "@/lib/diccionario";

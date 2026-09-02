@@ -46,7 +46,6 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
         env:
-          PANEL_PASSWORD: build
           MEDIDOR_API_KEY: build
 
   # El esquema SQL, aplicado dos veces sobre un Postgres limpio (idempotencia).
