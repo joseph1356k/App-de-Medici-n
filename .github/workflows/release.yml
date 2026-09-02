@@ -1,0 +1,44 @@
+name: release
+
+# Publica una versión descargable con UN enlace fijo, sin tener que rebuscar en Actions:
+#   https://github.com/joseph1356k/App-de-Medici-n/releases/latest/download/Medidor.exe
+#
+# Se dispara al empujar una etiqueta vN.N.N:  git tag v1.0.1 && git push origin v1.0.1
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  publicar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: "8.0.x" }
+
+      # No se publica nada que no pase el contrato del instrumento.
+      - run: dotnet run -c Release --project medidor/Contrato
+
+      - run: dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o salida medidor/App/App.csproj
+      - run: |
+          rm -f salida/*.pdb
+          cp medidor/instalar.ps1 medidor/desinstalar.ps1 salida/
+
+      - name: Publicar
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            salida/Medidor.exe salida/instalar.ps1 salida/desinstalar.ps1 \
+            --title "Medidor $GITHUB_REF_NAME" \
+            --notes "Descarga \`Medidor.exe\` y \`instalar.ps1\` en la misma carpeta, y en PowerShell:
+
+          \`\`\`powershell
+          .\\instalar.ps1 -Servidor \"https://TU-SERVIDOR\" -Clave \"TU_CLAVE\"
+          \`\`\`
+
+          No necesita permisos de administrador ni tener .NET instalado.
+          Pasos completos en [docs/INSTALAR.md](https://github.com/joseph1356k/App-de-Medici-n/blob/main/docs/INSTALAR.md)."

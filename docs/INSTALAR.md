@@ -50,8 +50,11 @@ el bloque de dueño (está en `supabase/migracion-esquema-aparte.sql`, listo par
 
 ### Conseguir `Medidor.exe`
 
-- **Desde GitHub Actions**: en la pestaña *Actions* del repo, la última corrida verde tiene el artefacto
-  **`Medidor-win-x64`** (un zip con `Medidor.exe`, `instalar.ps1` y `desinstalar.ps1`).
+- **Descarga directa** (lo normal): [`Medidor.exe`](../../releases/latest/download/Medidor.exe) y
+  [`instalar.ps1`](../../releases/latest/download/instalar.ps1) de la
+  [última versión publicada](../../releases/latest). Sin sesión de GitHub, sin descomprimir nada.
+- **Desde Actions**: cada corrida verde deja el artefacto **`Medidor-win-x64`** (un zip), útil para
+  probar un cambio antes de publicarlo como versión.
 - **O compilarlo** (en Windows, Linux o Mac con el SDK de .NET 8):
   ```
   dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o out medidor/App/App.csproj

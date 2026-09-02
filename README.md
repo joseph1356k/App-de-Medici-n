@@ -46,9 +46,9 @@ Directory* = `plataforma` → variables de entorno:
 Deploy. Abre la URL y ve a **Configuración** para escribir los nombres de los médicos (y sus usuarios
 de SAP si los sabes). El panel **no pide contraseña**: quien tenga la dirección entra y puede editar.
 
-**3. Los PCs** (2 min por PC, sin administrador). Descarga `Medidor.exe` (artefacto `Medidor-win-x64` de
-la última corrida de [Actions](../../actions), o `dotnet publish -c Release -r win-x64 --self-contained
--p:PublishSingleFile=true medidor/App/App.csproj`), ponlo junto a `medidor/instalar.ps1` y en PowerShell:
+**3. Los PCs** (2 min por PC, sin administrador). Descarga [`Medidor.exe`](../../releases/latest/download/Medidor.exe)
+e [`instalar.ps1`](../../releases/latest/download/instalar.ps1) de la [última versión](../../releases/latest)
+en la misma carpeta, y en PowerShell:
 
 ```powershell
 .\instalar.ps1 -Servidor "https://TU-PROYECTO.vercel.app" -Clave "LA_MEDIDOR_API_KEY"
