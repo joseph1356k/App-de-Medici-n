@@ -69,11 +69,19 @@ public sealed class Programa
         _ajustes = Ajustes.Cargar();
         if (!_ajustes.Completos)
         {
+            // Pasó en el primer PC del piloto (2026-09-02): alguien abrió Medidor.exe con doble
+            // clic, el gesto normal para un .exe, en vez de correr el instalador que deja escrito
+            // medidor.json. El mensaje genérico («corre instalar.ps1») no basta cuando la persona
+            // no sabe que ese archivo existe o cómo se llama en SU carpeta: aquí se lo busca y se
+            // nombra tal cual está, o se dice con todas las letras que no apareció ninguno.
+            var instalador = BuscarInstalador();
             Win32.MessageBoxW(IntPtr.Zero,
-                "Falta la configuración de conexión del medidor.\n\n"
-                + "Crea el archivo medidor.json con el servidor y la clave (instalar.ps1 lo hace solo):\n"
-                + Rutas.ArchivoDeAjustes,
-                "Medidor", Win32.MB_OK | Win32.MB_ICONERROR | Win32.MB_TOPMOST);
+                "Este programa (Medidor.exe) no se abre así, directamente.\n\n"
+                + (instalador != null
+                    ? $"En esta misma carpeta hay un instalador — ciérrate esta ventana y haz doble clic en:\n\n{Path.GetFileName(instalador)}\n\n(si Windows lo bloquea: clic derecho → Ejecutar con PowerShell)"
+                    : "Falta el instalador (un archivo .ps1) en esta carpeta. Pide el paquete completo — Medidor.exe solo, sin él, no se puede configurar.")
+                + $"\n\nRuta donde debería quedar la configuración:\n{Rutas.ArchivoDeAjustes}",
+                "Medidor — falta instalar", Win32.MB_OK | Win32.MB_ICONERROR | Win32.MB_TOPMOST);
             return 2;
         }
         _cliente = new ClienteServidor(_ajustes.Servidor!, _ajustes.Clave!, VersionApp());
@@ -412,6 +420,19 @@ public sealed class Programa
 
     private static string VersionApp()
         => typeof(Programa).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+
+    /// <summary>El script de instalación junto al .exe, si lo hay — buscado por lo que tiene en
+    /// común (empieza por "instal", termina en .ps1), no por un nombre fijo: el paquete que se
+    /// entrega a cada hospital puede renombrarlo (p. ej. INSTALAR-EN-ESTE-PC.ps1).</summary>
+    private static string? BuscarInstalador()
+    {
+        try
+        {
+            return Directory.EnumerateFiles(AppContext.BaseDirectory, "*.ps1")
+                .FirstOrDefault(f => Path.GetFileName(f).StartsWith("instal", StringComparison.OrdinalIgnoreCase));
+        }
+        catch { return null; }
+    }
 
     // ── Apagado ──────────────────────────────────────────────────────────────
 
