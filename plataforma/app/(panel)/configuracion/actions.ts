@@ -9,6 +9,19 @@ function volver(kind: "ok" | "error", msg: string): never {
   redirect(`${BASE}?${kind}=${encodeURIComponent(msg)}`);
 }
 
+/**
+ * SUBE LA VERSIÓN DE LA CONFIG. Hay que llamarlo desde CUALQUIER cambio que los PCs tengan que
+ * obedecer, porque el medidor solo vuelve a pedir la config cuando ve un número mayor que el
+ * suyo (Programa.cs: `if (cv > _config.Version)`). Sin esto, guardar la lista de médicos la
+ * dejaba viva en la base y muerta en los PCs: el panel decía «los PCs la reciben en su próximo
+ * latido» y era mentira — el latido llegaba con la misma versión y el cliente no pedía nada.
+ *
+ * Se descubrió antes de cargar el primer roster del HGM (2026-09-02), no después.
+ */
+async function avisarALosPcs(): Promise<void> {
+  await sql`update settings set config_version = config_version + 1, updated_at = now() where id = 1`;
+}
+
 export async function guardarHospital(formData: FormData): Promise<void> {
   const hospital = `${formData.get("hospital") ?? ""}`.trim().slice(0, 120);
   if (!hospital) volver("error", "El nombre no puede quedar vacío.");
@@ -39,8 +52,9 @@ export async function guardarRoster(formData: FormData): Promise<void> {
     }
     await tx`update roster set active = false where display_name <> all(${medicos.map((m) => m.display_name)})`;
   });
+  await avisarALosPcs();
   revalidatePath(BASE);
-  volver("ok", `Lista guardada: ${medicos.length} médicos. Los PCs la reciben en su próximo latido.`);
+  volver("ok", `Lista guardada: ${medicos.length} médicos. Los PCs la reciben en su próximo latido (un minuto).`);
 }
 
 export async function fijarFase(formData: FormData): Promise<void> {
@@ -51,6 +65,7 @@ export async function fijarFase(formData: FormData): Promise<void> {
   if (!["baseline", "notes", "notes_ops"].includes(phase) || !/^\d{4}-\d{2}-\d{2}$/.test(starts)) volver("error", "Faltan datos de la fase.");
   await sql`insert into study_phases (phase, starts_on, ends_on, notes) values (${phase}, ${starts}::date, ${ends}::date, ${notes})`;
   await sql`select relabel_phases()`;
+  await avisarALosPcs();
   revalidatePath("/", "layout");
   volver("ok", `Fase «${phase}» fijada desde ${starts}. Los turnos se re-etiquetaron según el calendario.`);
 }
@@ -60,6 +75,7 @@ export async function borrarFase(formData: FormData): Promise<void> {
   if (!/^[0-9a-f-]{36}$/i.test(id)) volver("error", "Petición inválida.");
   await sql`delete from study_phases where id = ${id}::uuid`;
   await sql`select relabel_phases()`;
+  await avisarALosPcs();
   revalidatePath("/", "layout");
   volver("ok", "Fase borrada y turnos re-etiquetados.");
 }
