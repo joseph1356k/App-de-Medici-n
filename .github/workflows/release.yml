@@ -7,6 +7,14 @@ name: release
 on:
   push:
     tags: ["v*"]
+  # También a mano, desde la pestaña Actions: útil cuando quien publica no puede empujar
+  # etiquetas (un entorno con el git filtrado, por ejemplo).
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Versión a publicar, p. ej. v1.0.0"
+        required: true
+        default: "v1.0.0"
 
 permissions:
   contents: write
@@ -31,9 +39,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
+          TAG="${{ github.event.inputs.version }}"
+          [ -z "$TAG" ] && TAG="$GITHUB_REF_NAME"
+          gh release create "$TAG" --target "$GITHUB_SHA" \
             salida/Medidor.exe salida/instalar.ps1 salida/desinstalar.ps1 \
-            --title "Medidor $GITHUB_REF_NAME" \
+            --title "Medidor $TAG" \
             --notes "Descarga \`Medidor.exe\` y \`instalar.ps1\` en la misma carpeta, y en PowerShell:
 
           \`\`\`powershell
