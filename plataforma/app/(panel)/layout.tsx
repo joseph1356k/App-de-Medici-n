@@ -53,3 +53,7 @@ export default async function PanelLayout({ children }: { children: React.ReactN
     </div>
   );
 }
+
+// Un fallo tiene que verse en 30 s, no a los 300 que da Vercel por defecto: un giro
+// de cinco minutos no es información, es un cuelgue.
+export const maxDuration = 30;

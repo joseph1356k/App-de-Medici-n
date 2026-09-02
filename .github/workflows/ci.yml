@@ -65,3 +65,16 @@ jobs:
           psql -v ON_ERROR_STOP=1 postgres://postgres:postgres@localhost:5432/postgres -f plataforma/supabase/schema.sql
           psql -v ON_ERROR_STOP=1 postgres://postgres:postgres@localhost:5432/postgres -f plataforma/supabase/schema.sql
           psql -v ON_ERROR_STOP=1 postgres://postgres:postgres@localhost:5432/postgres -f plataforma/supabase/prueba-esquema.sql
+
+      # Y con la base ya en pie, la prueba de terreno del cliente: que una consulta colgada
+      # suelte su conexión (lo que tumbó el panel el 2026-09-02) y que el Proxy del reloj no
+      # haya roto transacciones, sql.json ni los cursores de la exportación.
+      - uses: actions/setup-node@v4
+        with: { node-version: "22", cache: npm, cache-dependency-path: plataforma/package-lock.json }
+      - run: npm ci
+        working-directory: plataforma
+      - run: npx vitest run tests/terreno.test.ts
+        working-directory: plataforma
+        env:
+          PRUEBA_TERRENO: "1"
+          PRUEBA_TERRENO_URL: postgres://postgres:postgres@localhost:5432/postgres

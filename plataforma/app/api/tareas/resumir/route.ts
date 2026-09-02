@@ -2,7 +2,7 @@
 // para cuando cambia la definición de una métrica). Lo llama el cron de Vercel cada
 // día (Authorization: Bearer CRON_SECRET; el plan Hobby de Vercel solo permite crons diarios) y se
 // puede llamar a mano con X-API-Key. El lote ya resume al instante: esto es la red de seguridad.
-import { sql } from "@/lib/db";
+import { sqlLargo as sql } from "@/lib/db";
 import { claveValida, json } from "@/lib/api";
 
 export const runtime = "nodejs";
