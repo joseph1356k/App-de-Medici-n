@@ -4,7 +4,7 @@
 //   todo lo demás (panel y exportaciones) → cookie del panel, o ?clave=PANEL_PASSWORD
 //   (para pegar una URL de exportación en una herramienta de IA sin pasar por el login).
 import { NextResponse, type NextRequest } from "next/server";
-import { COOKIE, cookieValida, passwordValida } from "@/lib/acceso";
+import { COOKIE, cookieValida, passwordValida, tokenEsperado } from "@/lib/acceso";
 
 export async function middleware(req: NextRequest) {
   const { pathname, searchParams } = req.nextUrl;
@@ -18,7 +18,22 @@ export async function middleware(req: NextRequest) {
     return NextResponse.redirect(url);
   }
   if (await cookieValida(req.cookies.get(COOKIE)?.value)) return NextResponse.next();
-  if (passwordValida(searchParams.get("clave"))) return NextResponse.next();
+
+  // Un enlace con ?clave= no solo abre lo que pide: deja la cookie puesta. Así entrar es un
+  // clic en vez de teclear una contraseña de catorce caracteres con mayúsculas y minúsculas
+  // mezcladas — que es donde se atasca todo el mundo la primera vez. En una página se
+  // redirige a la URL limpia (la clave deja de estar en la barra de direcciones); en una
+  // exportación no, porque un redirect rompería la descarga.
+  if (passwordValida(searchParams.get("clave"))) {
+    const limpia = req.nextUrl.clone();
+    limpia.searchParams.delete("clave");
+    const res = pathname.startsWith("/api/") ? NextResponse.next() : NextResponse.redirect(limpia);
+    res.cookies.set(COOKIE, await tokenEsperado(), {
+      httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/",
+      maxAge: 60 * 60 * 24 * 90,
+    });
+    return res;
+  }
 
   if (pathname.startsWith("/api/")) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
   const url = req.nextUrl.clone();
