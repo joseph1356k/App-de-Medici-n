@@ -30,9 +30,23 @@ jobs:
       # No se publica nada que no pase el contrato del instrumento.
       - run: dotnet run -c Release --project medidor/Contrato
 
+      # Un .exe publicado SIN clave se instala igual y falla en cada PC del hospital, uno por uno,
+      # con la persona delante. Eso no se descubre en el CI: se descubre en el sexto computador.
+      # Aquí se corta antes, con el motivo escrito.
+      - name: Exigir la clave del servidor
+        env:
+          MEDIDOR_CLAVE: ${{ secrets.MEDIDOR_CLAVE }}
+        run: |
+          if [ -z "$MEDIDOR_CLAVE" ]; then
+            echo "::error::Falta el secreto MEDIDOR_CLAVE del repositorio. Sin él, el Medidor.exe"
+            echo "::error::publicado sale sin clave y no puede instalarse con doble clic."
+            echo "::error::Ponlo en Settings → Secrets and variables → Actions → New repository secret."
+            exit 1
+          fi
+          echo "Clave presente (${#MEDIDOR_CLAVE} caracteres)."
+
       # La clave del servidor entra AQUÍ, desde el secreto del repo, nunca desde el código. Es lo
-      # que hace que el .exe publicado se instale con un doble clic, sin teclear nada. Si el
-      # secreto no está puesto el build NO falla: sale un .exe sin clave, que lo dice al abrirse.
+      # que hace que el .exe publicado se instale con un doble clic, sin teclear nada.
       - run: dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:MedidorClavePorDefecto="$MEDIDOR_CLAVE" -o salida medidor/App/App.csproj
         env:
           MEDIDOR_CLAVE: ${{ secrets.MEDIDOR_CLAVE }}
