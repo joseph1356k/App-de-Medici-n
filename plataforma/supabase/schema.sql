@@ -758,6 +758,11 @@ begin
       union
       select s.device_id, s.dia_operativo from jornada_summary s
         where s.dia_operativo = dia_operativo_de(now()) and s.resumido_en < now() - interval '10 minutes'
+      union
+      -- Y las que se resumieron con un algoritmo viejo. Sin esto, cambiar la forma de medir deja
+      -- media historia calculada con la regla anterior y la otra media con la nueva, y nadie se
+      -- entera hasta que dos números que deberían cuadrar no cuadran.
+      select s.device_id, s.dia_operativo from jornada_summary s where s.algo_version < 3
     ) x order by x.dia_operativo limit greatest(1, coalesce(p_max, 500))
   loop
     perform recompute_jornada(r.device_id, r.dia_operativo);
