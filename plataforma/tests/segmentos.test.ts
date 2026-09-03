@@ -66,6 +66,30 @@ describe("segmentar", () => {
     expect(t).toEqual({ activo: 15_000, inactivo: 15_000, sin_datos: 45_000, bloqueado: 15_000 });
   });
 
+  it("una fila fundida vale por todo su tramo, no por 15 s", () => {
+    // El medidor funde en UNA fila los tramos en los que no pasa nada (una noche bloqueado son
+    // unas pocas filas, no miles). Si aquí se diera por hecho 15 s, ese tiempo desaparecería del
+    // dibujo y de los totales.
+    const bloqueo = cubeta(4, { app: "bloqueado", surface: null, encounter_key: null, sap_user: null, active_ms: 0, bucket_ms: 600_000, foreground_ms: 600_000 });
+    const segs = segmentar([cubeta(0), cubeta(1), cubeta(2), cubeta(3), bloqueo]);
+    expect(segs.map((s) => s.estado)).toEqual(["activo", "bloqueado"]);
+    expect(dur(segs[1])).toBe(600_000);
+    expect(segs[1].inicio).toBe(segs[0].fin); // pegada a lo anterior: sin hueco inventado
+    expect(totalesPorEstado(segs)).toEqual({ activo: 60_000, inactivo: 0, bloqueado: 600_000, sin_datos: 0 });
+  });
+
+  it("y tras una fila fundida el hueco se mide desde donde de verdad terminó", () => {
+    const bloqueo = cubeta(0, { app: "bloqueado", surface: null, encounter_key: null, sap_user: null, active_ms: 0, bucket_ms: 600_000, foreground_ms: 600_000 });
+    // La siguiente cubeta empieza justo al acabar el tramo: contiguo, sin «sin datos».
+    const pegada = cubeta(40);
+    expect(segmentar([bloqueo, pegada]).map((s) => s.estado)).toEqual(["bloqueado", "activo"]);
+    // Una que empieza 45 s después del fin del tramo sí abre un hueco.
+    const tarde = cubeta(43);
+    const conHueco = segmentar([bloqueo, tarde]);
+    expect(conHueco.map((s) => s.estado)).toEqual(["bloqueado", "sin_datos", "activo"]);
+    expect(dur(conHueco[1])).toBe(45_000);
+  });
+
   it("tcodeDe saca la transacción de la pantalla SAP", () => {
     expect(tcodeDe(SAP)).toBe("NV2000");
     expect(tcodeDe("sapgui://PRD//SAPMSYST/0100")).toBeNull();

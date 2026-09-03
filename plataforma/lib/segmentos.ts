@@ -35,6 +35,10 @@ export type Bucket = {
 };
 
 export const CUBETA_MS = 15_000;
+/** Lo que cubre una fila. Normalmente son los 15 s de su cubeta, pero el medidor funde los tramos
+ * en los que no pasa nada en UNA fila que cubre todo el tramo (una noche bloqueado son unas pocas
+ * filas, no miles). Dar por hecho 15 s aquí se comería ese tiempo del dibujo y de los totales. */
+export const anchoDe = (b: Pick<Bucket, "bucket_ms">) => (b.bucket_ms > 0 ? b.bucket_ms : CUBETA_MS);
 /** Un hueco mayor que esto entre dos cubetas consecutivas es «sin datos». Dos cubetas
  * seguidas distan 15 s; 30 s tolera una cubeta perdida sin abrir un agujero en el dibujo. */
 export const HUECO_MS = 30_000;
@@ -62,9 +66,10 @@ function mismaClave(s: Seg, b: Bucket, estado: Estado): boolean {
 }
 
 /**
- * Cubetas → segmentos. Dentro de una misma cubeta, las partes (seq 0, 1, 2…) se reparten
- * los 15 s en proporción a su foreground_ms, en orden: así el tramo de cada parte es
- * contiguo al anterior y suma exactamente la cubeta, diga lo que diga `bucket_ms`.
+ * Cubetas → segmentos. Cada fila cubre lo que dice su `bucket_ms` (15 s lo normal; un tramo
+ * entero si el medidor lo fundió por no pasar nada). Dentro de una misma cubeta, las partes
+ * (seq 0, 1, 2…) se reparten ese ancho en proporción a su foreground_ms, en orden: así el tramo
+ * de cada parte es contiguo al anterior y las partes suman exactamente la cubeta.
  */
 export function segmentar(buckets: Bucket[], huecoMs = HUECO_MS): Segmento[] {
   const orden = [...buckets].sort((a, b) => ms(a.bucket_start) - ms(b.bucket_start) || a.seq - b.seq);
@@ -79,12 +84,13 @@ export function segmentar(buckets: Bucket[], huecoMs = HUECO_MS): Segmento[] {
     i = j;
 
     const total = partes.reduce((s, p) => s + Math.max(0, p.foreground_ms), 0);
+    const ancho = Math.max(...partes.map(anchoDe));
     let cursor = T;
     partes.forEach((b, k) => {
       const ultima = k === partes.length - 1;
-      const dur = ultima ? T + CUBETA_MS - cursor
-        : total > 0 ? Math.round((Math.max(0, b.foreground_ms) / total) * CUBETA_MS) : Math.round(CUBETA_MS / partes.length);
-      const inicio = cursor, fin = Math.min(T + CUBETA_MS, cursor + Math.max(0, dur));
+      const dur = ultima ? T + ancho - cursor
+        : total > 0 ? Math.round((Math.max(0, b.foreground_ms) / total) * ancho) : Math.round(ancho / partes.length);
+      const inicio = cursor, fin = Math.min(T + ancho, cursor + Math.max(0, dur));
       cursor = fin;
       if (fin <= inicio) return;
 

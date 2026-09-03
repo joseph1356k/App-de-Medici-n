@@ -60,6 +60,7 @@ internal static class Contrato
         Prueba("31. la jornada lleva proceso_id: dos fotos del mismo día desde procesos distintos se distinguen", LaJornadaLlevaProcesoId);
         Prueba("32. un 403 de «no te conozco» vuelve a registrar; uno de pausa deliberada, no", LosDos403SeDistinguen);
         Prueba("33. si SAP no deja engancharse, el aviso al médico se espacia en vez de repetirse", ElEngancheNoAtosiga);
+        Prueba("34. un tramo en el que no pasa nada viaja como UNA fila que cubre los mismos ms, ni uno más", LosTramosVaciosSeFunden);
 
         Console.WriteLine();
         Console.WriteLine(_fallos == 0
@@ -309,7 +310,9 @@ internal static class Contrato
         var c = new Cubetas();
         var t0 = new DateTimeOffset(2026, 9, 1, 13, 0, 0, TimeSpan.Zero);
         var app = new Superficie("sap", null);
-        Aportes mil = new(1000, 0, 0, 0, 0, 0, 0, 0, 0);
+        // Con actividad a propósito: una cubeta sin nada dentro se funde con la siguiente (promesa 34),
+        // y lo que aquí se juzga es la alineación al reloj y el tamaño de UNA cubeta.
+        Aportes mil = new(1000, 1000, 0, 0, 1, 0, 0, 0, 0);
 
         c.Registrar(t0.AddSeconds(14.5), app, null, mil);
         c.Registrar(t0.AddSeconds(15.5), app, null, mil);
@@ -909,6 +912,71 @@ internal static class Contrato
     /// enganche no entra, el medidor NO puede volver a pedirlo cada pocos segundos: mediría el
     /// trabajo estorbándolo. La espera crece y se reinicia solo cuando por fin engancha.
     /// </summary>
+    /// <summary>
+    /// PROMESA 34. Un PC encendido de noche, o bloqueado media tarde, produce una cubeta cada 15 s
+    /// en la que no pasa nada: miles de filas idénticas que cuestan disco, red y base sin decir
+    /// nada. Se funden en una sola fila cuyo `bucket_ms` cubre el tramo entero.
+    ///
+    /// Lo que NO puede pasar, y es lo que se juzga aquí: que fundir pierda o invente tiempo. La
+    /// suma de los `bucket_ms` emitidos tiene que ser exactamente la del tramo medido, y el tramo
+    /// tiene que cortarse en cuanto pasa algo, cambia el contexto o cambia el día operativo.
+    /// </summary>
+    private static void LosTramosVaciosSeFunden()
+    {
+        var app = new Superficie("sap", "sapgui://PRD/NV2000/P/0100");
+        var quieto = new Aportes(Cubetas.TamanoMs, 0, 0, 0, 0, 0, 0, 0, 0);
+        var activo = new Aportes(Cubetas.TamanoMs, 12000, 3000, 20, 3, 0, 0, 0, 0);
+        int cubetasDelTope = Cubetas.TopeDelTramoTranquiloMs / Cubetas.TamanoMs;
+
+        // 40 cubetas seguidas sin nada (10 min) con el tope en 5 min: dos filas, y entre las dos
+        // cubren los 10 minutos exactos.
+        var t0 = new DateTimeOffset(2026, 9, 1, 13, 0, 0, TimeSpan.Zero);
+        var c = new Cubetas();
+        for (int k = 0; k < 40; k++) c.Registrar(t0.AddSeconds(15 * k + 1), app, null, quieto);
+        var filas = c.CosecharTodo();
+        Debe(filas.Count == 40 / cubetasDelTope, $"40 cubetas vacías salen como {40 / cubetasDelTope} filas, no como 40");
+        Debe(filas.Sum(f => (long)f.BucketMs) == 40L * Cubetas.TamanoMs, "y entre todas cubren exactamente los mismos milisegundos");
+        Debe(filas.Sum(f => (long)f.ForegroundMs) == 40L * Cubetas.TamanoMs, "con todo el foreground dentro: no se pierde tiempo medido");
+        Debe(filas.All(f => f.ActiveMs == 0 && f.Teclas == 0 && f.Clics == 0), "un tramo fundido es, por definición, tiempo sin actividad");
+        Debe(filas[0].BucketStart == t0 && filas[0].BucketMs == Cubetas.TopeDelTramoTranquiloMs, "la primera arranca donde arrancó el tramo y llega al tope");
+        Debe(filas.Zip(filas.Skip(1)).All(par => par.First.BucketStart.AddMilliseconds(par.First.BucketMs) == par.Second.BucketStart),
+            "y las filas van pegadas: sin huecos inventados entre ellas");
+
+        // Que pase algo corta el tramo, y sigue cuadrando el total.
+        c = new Cubetas();
+        for (int k = 0; k < 3; k++) c.Registrar(t0.AddSeconds(15 * k + 1), app, null, quieto);
+        c.Registrar(t0.AddSeconds(15 * 3 + 1), app, null, activo);
+        for (int k = 4; k < 6; k++) c.Registrar(t0.AddSeconds(15 * k + 1), app, null, quieto);
+        filas = c.CosecharTodo();
+        Debe(filas.Count == 3, "tres cubetas vacías, una con actividad y dos vacías son tres filas");
+        Debe(filas[1].ActiveMs == 12000 && filas[1].BucketMs == Cubetas.TamanoMs, "la cubeta con actividad viaja entera y sin fundir");
+        Debe(filas.Sum(f => (long)f.BucketMs) == 6L * Cubetas.TamanoMs, "y el total sigue siendo el tiempo real, ni un ms más");
+
+        // Cambiar de app, de paciente o de usuario SAP también corta.
+        c = new Cubetas();
+        c.Registrar(t0.AddSeconds(1), app, null, quieto);
+        c.Registrar(t0.AddSeconds(16), app, null, quieto);
+        c.Registrar(t0.AddSeconds(31), new Superficie("chrome", null), null, quieto);
+        c.Registrar(t0.AddSeconds(46), app, "a".PadRight(32, 'a'), quieto);
+        c.Registrar(t0.AddSeconds(61), app, "a".PadRight(32, 'a'), quieto, "MED01");
+        filas = c.CosecharTodo();
+        Debe(filas.Count == 4, "el tramo se corta al cambiar la app, el paciente o el usuario SAP");
+        Debe(filas[0].BucketMs == 2 * Cubetas.TamanoMs, "solo se funde lo que comparte contexto");
+        Debe(filas.Sum(f => (long)f.BucketMs) == 5L * Cubetas.TamanoMs, "y el total, otra vez, es el tiempo real");
+
+        // Y NUNCA cruza el día operativo: una fila pertenece a un día, no a dos.
+        var antesDelCorte = new DateTimeOffset(2026, 9, 2, 5, 59, 45, TimeSpan.FromHours(-5));
+        c = new Cubetas();
+        c.Registrar(antesDelCorte.AddSeconds(1), app, null, quieto);
+        c.Registrar(antesDelCorte.AddSeconds(16), app, null, quieto);
+        filas = c.CosecharTodo();
+        Debe(filas.Count == 2 && filas[0].DiaOperativo != filas[1].DiaOperativo,
+            "a las 06:00 el tramo se corta: una fila fundida no puede pertenecer a dos días operativos");
+
+        // Al cerrar no queda nada esperando en memoria.
+        Debe(c.CosecharTodo().Count == 0, "y tras cerrar no queda ningún tramo colgado");
+    }
+
     private static void ElEngancheNoAtosiga()
     {
         Debe(RitmoDeEnganche.EsperaTrasRechazoS(0) >= 60, "tras la primera negativa se espera al menos un minuto");

@@ -21,7 +21,7 @@ clínico. En PCs compartidos de tres consultorios, con Windows, con el asistente
 │   ├ HiloSap (STA): identidad SAP por COM, disciplina Busy      │                                  └ panel (público): inicio · día del consultorio · jornadas ·
 │   ├ Orquestador (1 s): SIEMPRE registra → normaliza → encounter│                                     comparación · SAP · dispositivos · configuración · exportar
 │   │   → cubetas 15 s (bloqueado incluido)                      │                                              │
-│   ├ Dominio (puro, 33 promesas): Reloj, Actividad, Escritura,  │                                              ▼
+│   ├ Dominio (puro, 34 promesas): Reloj, Actividad, Escritura,  │                                              ▼
 │   │   Cubetas, Huella HMAC, Jornada, Continuidad, Viaje SAP,   │                                  Postgres (Supabase): settings · roster · study_phases · consultorios ·
 │   │   Calidad, SaludDeGanchos, GuardiaDeRelanzos               │                                  devices · jornadas · samples · events · sap_visits · jornada_summary
 │   ├ SpoolSqlite: durable, ack antes de borrar, tope 200 MB,    │
@@ -68,6 +68,13 @@ normales»), y aquí contar mal contamina un baseline que no se puede volver a m
 **Sin códigos de enrolamiento.** La clave de la API ya autentica la instalación; el PC se registra por
 nombre de máquina y guarda su `device_id`. Reinstalar no duplica. Un PC se pausa o retira desde el panel.
 
+**Los tramos vacíos viajan fundidos.** Un PC encendido de noche produce una cubeta cada 15 s en la
+que no pasa nada: ~3.400 filas por noche y por PC, todas idénticas. Mientras no haya nada (ni input,
+ni tecleo, ni clics, ni round-trips) y no cambie el contexto ni el día operativo, las cubetas seguidas
+se emiten como UNA fila cuyo `bucket_ms` cubre el tramo entero, con un tope de 5 min. El tiempo
+cubierto es exactamente el mismo —lo vigila la promesa 34— y el resumen y la línea de tiempo miden
+por `bucket_ms`, no dando por hecho 15 s.
+
 **Cubetas de 15 s, deltas, nunca totales.** Cada milisegundo cae en exactamente una cubeta alineada al
 reloj de pared; la cubeta se parte al cambiar app, pantalla, paciente o usuario SAP. Un tick jamás aporta
 más de 2 s, y lo que un tick atascado no aporta se cuenta como hueco. Idempotencia por
@@ -109,8 +116,8 @@ input en 60 s; escritura por ráfagas sin teclas) · 10-11 cubetas (partición s
 usuario SAP; cada ms en una cubeta de 15 s) · 12-13 continuidad (la jornada cambia sola a las 06:00; un PC
 bloqueado sigue emitiendo cubetas `bloqueado`) · 14-17 spool (no pierde ni duplica; descarta contando;
 topes y veneno por nombre del spool; uid sobrevive al reinicio) · 18 calidad · 19-21 viaje SAP · 22 cable
-v2 · 23 teclas de control · 24-33 resiliencia (huecos de un reloj atascado, rearme de ganchos, guardia de
-relanzos, spool corrupto, compactación de fotos, purga v1, clave por tick, `proceso_id`, los dos 403, el enganche a SAP que no atosiga).
+v2 · 23 teclas de control · 24-34 resiliencia (huecos de un reloj atascado, rearme de ganchos, guardia de
+relanzos, spool corrupto, compactación de fotos, purga v1, clave por tick, `proceso_id`, los dos 403, el enganche a SAP que no atosiga, los tramos vacíos fundidos).
 
 ## Lo que queda por comprobar en un PC real
 

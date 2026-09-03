@@ -48,6 +48,28 @@ public sealed class Cubetas
 
     private readonly SortedDictionary<long, Cubeta> _cubetas = new();
 
+    /// <summary>
+    /// EL TRAMO TRANQUILO EN CURSO. Un PC encendido toda la noche, o bloqueado media tarde, produce
+    /// una cubeta cada 15 s en la que no pasa absolutamente nada: 240 filas por hora, ~3.400 en una
+    /// noche, por PC, todas diciendo lo mismo. Guardarlas una a una cuesta disco, red y base sin
+    /// añadir ni un dato — el minuto 43 de un bloqueo no dice nada que no diga «bloqueado de 22:10
+    /// a 06:05».
+    ///
+    /// Así que mientras no haya NADA (ni input, ni tecleo, ni clics, ni round-trips) y el contexto
+    /// no cambie, las cubetas seguidas se acumulan en UNA fila cuyo `bucket_ms` cubre todo el tramo.
+    /// En cuanto vuelve a pasar algo, o cambia la app, la pantalla, el paciente o el usuario SAP, el
+    /// tramo se cierra y se emite. No se pierde tiempo ni se inventa: la fila cubre exactamente los
+    /// mismos milisegundos que cubrían las cubetas que resume.
+    /// </summary>
+    private Parte? _tranquila;
+    private long _tranquilaInicio, _tranquilaFin;
+    private DateOnly _tranquilaDia;
+
+    /// <summary>Hasta dónde puede crecer un tramo tranquilo antes de emitirse igualmente. Cinco
+    /// minutos: suficiente para bajar una noche de 3.400 filas a 170, y poco para que un corte de
+    /// luz se lleve por delante algo que importe (lo que se pierde es «no pasaba nada»).</summary>
+    public const int TopeDelTramoTranquiloMs = 5 * 60 * 1000;
+
     public void Registrar(DateTimeOffset instante, Superficie superficie, string? encounterKey, Aportes aportes, string? sapUser = null)
     {
         var inicio = instante.ToUnixTimeMilliseconds() / TamanoMs * TamanoMs;
@@ -87,19 +109,68 @@ public sealed class Cubetas
     {
         var tope = hasta.ToUnixTimeMilliseconds();
         var listas = _cubetas.Keys.Where(inicio => inicio + TamanoMs <= tope).ToList();
-        return Emitir(listas);
+        return Emitir(listas, cerrarTramo: false);
     }
 
     /// <summary>Todo, incluida la cubeta en curso. Solo para el cierre (cambio de día, app que se
     /// apaga, volcado de un colapso): después de esto no puede llegar ningún tick más de esas cubetas.</summary>
-    public IReadOnlyList<Muestra> CosecharTodo() => Emitir(_cubetas.Keys.ToList());
+    public IReadOnlyList<Muestra> CosecharTodo() => Emitir(_cubetas.Keys.ToList(), cerrarTramo: true);
 
-    private IReadOnlyList<Muestra> Emitir(List<long> inicios)
+    /// <summary>¿En esta parte no pasó absolutamente nada? Solo entonces se puede fundir con la
+    /// siguiente: el foreground se suma, y lo demás ya es cero.</summary>
+    private static bool NoPasaNada(Parte p) =>
+        p.ActiveMs == 0 && p.TypingMs == 0 && p.Teclas == 0 && p.Clics == 0 && p.Scroll == 0
+        && p.CambiosDeContexto == 0 && p.SapRoundtrips == 0 && p.SapEsperaMs == 0
+        && p.Tabs == 0 && p.Enters == 0 && p.Correcciones == 0 && p.Copias == 0 && p.Pegados == 0 && p.Guardados == 0;
+
+    private static bool MismoContexto(Parte a, Parte b) =>
+        a.App == b.App && a.Surface == b.Surface && a.EncounterKey == b.EncounterKey && a.SapUser == b.SapUser;
+
+    private Muestra TramoTranquiloComoFila() => new(
+        DateTimeOffset.FromUnixTimeMilliseconds(_tranquilaInicio), (int)(_tranquilaFin - _tranquilaInicio), 0,
+        _tranquila!.App, _tranquila.Surface, _tranquila.EncounterKey, _tranquila.SapUser, _tranquilaDia,
+        _tranquila.ForegroundMs, 0, 0, 0, 0, 0, 0, 0, 0);
+
+    private void SoltarTramo(List<Muestra> filas)
+    {
+        if (_tranquila == null) return;
+        filas.Add(TramoTranquiloComoFila());
+        _tranquila = null;
+    }
+
+    private IReadOnlyList<Muestra> Emitir(List<long> inicios, bool cerrarTramo)
     {
         var filas = new List<Muestra>();
         foreach (var inicio in inicios)
         {
             var cubeta = _cubetas[inicio];
+
+            // Una cubeta con UNA sola parte y sin nada dentro puede unirse al tramo tranquilo.
+            if (cubeta.Partes.Count == 1 && NoPasaNada(cubeta.Partes[0]))
+            {
+                var p0 = cubeta.Partes[0];
+                bool sigue = _tranquila != null && _tranquilaFin == inicio && _tranquilaDia == cubeta.Dia
+                    && MismoContexto(_tranquila, p0)
+                    && (_tranquilaFin + TamanoMs - _tranquilaInicio) <= TopeDelTramoTranquiloMs;
+                if (sigue)
+                {
+                    _tranquila!.ForegroundMs += p0.ForegroundMs;
+                    _tranquilaFin = inicio + TamanoMs;
+                }
+                else
+                {
+                    SoltarTramo(filas);
+                    _tranquila = new Parte { App = p0.App, Surface = p0.Surface, EncounterKey = p0.EncounterKey, SapUser = p0.SapUser, ForegroundMs = p0.ForegroundMs };
+                    _tranquilaInicio = inicio;
+                    _tranquilaFin = inicio + TamanoMs;
+                    _tranquilaDia = cubeta.Dia;
+                }
+                _cubetas.Remove(inicio);
+                continue;
+            }
+
+            // Pasó algo: el tramo tranquilo se cierra ANTES, para que las filas salgan en orden.
+            SoltarTramo(filas);
             for (int seq = 0; seq < cubeta.Partes.Count; seq++)
             {
                 var p = cubeta.Partes[seq];
@@ -112,6 +183,8 @@ public sealed class Cubetas
             }
             _cubetas.Remove(inicio);
         }
+        // Al cerrar (cambio de día, apagado, volcado de un colapso) no queda nada esperando.
+        if (cerrarTramo) SoltarTramo(filas);
         return filas;
     }
 }

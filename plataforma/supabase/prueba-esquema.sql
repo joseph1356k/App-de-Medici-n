@@ -30,9 +30,11 @@ select '22222222-2222-2222-2222-222222222222', date '2026-09-01', timestamptz '2
   case when g < 120 then repeat('a', 32) when g < 240 then repeat('b', 32) else repeat('a', 32) end,
   'MED01', 15000, 12000, 3000, 20, 3
 from generate_series(0, 439) g where g < 300 or g >= 380;
+-- Los 10 min bloqueados (cubetas 440..479) viajan FUNDIDOS en una sola fila, como los manda el
+-- medidor: bucket_ms = 600 000. Si el resumen diera por hecho 15 s por fila, bloqueado_ms saldría
+-- 15 000 en vez de 600 000 y esta prueba lo cazaría.
 insert into samples (device_id, dia_operativo, bucket_start, bucket_ms, seq, app, foreground_ms, active_ms)
-select '22222222-2222-2222-2222-222222222222', date '2026-09-01', timestamptz '2026-09-01 08:00:00-05' + g * interval '15 seconds', 15000, 0, 'bloqueado', 15000, 0
-from generate_series(440, 479) g;
+values ('22222222-2222-2222-2222-222222222222', date '2026-09-01', timestamptz '2026-09-01 08:00:00-05' + 440 * interval '15 seconds', 600000, 0, 'bloqueado', 600000, 0);
 -- Un reenvío de la primera cubeta: la clave natural lo descarta.
 insert into samples (device_id, dia_operativo, bucket_start, bucket_ms, seq, app, foreground_ms, active_ms)
 values ('22222222-2222-2222-2222-222222222222', date '2026-09-01', timestamptz '2026-09-01 08:00:00-05', 15000, 0, 'sap', 15000, 12000)
@@ -67,11 +69,11 @@ end $$;
 -- Asignar el consultorio ESTAMPA lo que estaba sin consultorio y deja un evento.
 do $$ declare r record; begin
   select * into r from asignar_consultorio('22222222-2222-2222-2222-222222222222', (select id from consultorios where nombre = 'Consultorio 1'));
-  if r.n_muestras <> 400 then raise exception 'asignar_consultorio: muestras % (esperado 400)', r.n_muestras; end if;
+  if r.n_muestras <> 361 then raise exception 'asignar_consultorio: muestras % (esperado 361)', r.n_muestras; end if;
   if r.n_eventos <> 2 or r.n_visitas <> 2 or r.n_jornadas <> 2 then raise exception 'asignar_consultorio: eventos/visitas/jornadas %/%/% (esperado 2/2/2)', r.n_eventos, r.n_visitas, r.n_jornadas; end if;
   if (select count(*) from samples where consultorio_id is null) <> 0 then raise exception 'quedaron muestras sin consultorio'; end if;
   if (select count(*) from events where kind = 'consultorio_asignado') <> 1 then raise exception 'falta el evento consultorio_asignado'; end if;
-  if (select count(*) from samples) <> 400 then raise exception 'la cubeta reenviada se insertó dos veces'; end if;
+  if (select count(*) from samples) <> 361 then raise exception 'filas en samples: % (esperado 361: 360 cubetas + 1 tramo bloqueado fundido)', (select count(*) from samples); end if;
   if (select consultorio_desde from devices where id = '22222222-2222-2222-2222-222222222222') is null then raise exception 'consultorio_desde no se fijó'; end if;
 end $$;
 

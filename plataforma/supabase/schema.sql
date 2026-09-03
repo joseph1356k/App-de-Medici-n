@@ -493,10 +493,13 @@ begin
     activo_ms, his_ms, miracle_ms, typing_ms, keystrokes, clicks, tabs, enters, correcciones, copias, pegados, guardados,
     tramos, post_atencion_ms, siguiente_ms, visitas, pantallas_distintas, sap_wait_ms, ready_ms_p50, sap_user)
   with b as (
-    select bucket_start, seq, app, encounter_key, sap_user, active_ms, typing_ms, keystrokes, clicks, tabs, enters, correcciones, copias, pegados, guardados
+    select bucket_start, seq, app, encounter_key, sap_user, active_ms, typing_ms, keystrokes, clicks, tabs, enters, correcciones, copias, pegados, guardados,
+      coalesce(nullif(bucket_ms, 0), 15000)::bigint as ancho_ms
     from samples s where s.device_id = p_device and s.dia_operativo = p_dia and s.encounter_key is not null),
   pac as (
-    select encounter_key, min(bucket_start) primera, max(bucket_start) + interval '15 seconds' ultima,
+    -- El paciente pudo quedarse abierto mientras nadie tocaba el PC: esa cubeta fundida cuenta con
+    -- su ancho real, no con 15 s.
+    select encounter_key, min(bucket_start) primera, max(bucket_start + (ancho_ms || ' milliseconds')::interval) ultima,
       sum(active_ms)::bigint act, coalesce(sum(active_ms) filter (where app = 'sap'), 0)::bigint his, coalesce(sum(active_ms) filter (where app = 'miracle_web'), 0)::bigint mir,
       sum(typing_ms)::bigint typ, sum(keystrokes)::bigint ks, sum(clicks)::bigint cl,
       sum(tabs)::bigint tabs, sum(enters)::bigint enters, sum(correcciones)::bigint corr, sum(copias)::bigint cop, sum(pegados)::bigint peg, sum(guardados)::bigint gua
@@ -552,12 +555,16 @@ begin
     select s.bucket_start, s.seq, s.app, s.surface, s.encounter_key, s.sap_user,
       s.foreground_ms, s.active_ms, s.typing_ms, s.keystrokes, s.clicks, s.scroll_ticks, s.context_switches,
       s.sap_roundtrips, s.sap_wait_ms, s.tabs, s.enters, s.correcciones, s.copias, s.pegados, s.guardados,
+      -- El ancho de una fila es su bucket_ms: 15 s lo normal, o el tramo entero cuando el medidor
+      -- fundió cubetas en las que no pasaba nada (una noche bloqueado son unas pocas filas). Dar
+      -- por hecho 15 s aquí se comería ese tiempo de bloqueado_ms, inactivo_ms y la cobertura.
+      coalesce(nullif(s.bucket_ms, 0), 15000)::bigint as ancho_ms,
       case when sum(greatest(s.foreground_ms, 0)) over (partition by s.bucket_start) > 0
-           then round(greatest(s.foreground_ms, 0) * 15000.0 / sum(greatest(s.foreground_ms, 0)) over (partition by s.bucket_start))
-           else round(15000.0 / count(*) over (partition by s.bucket_start)) end::bigint as dur_ms
+           then round(greatest(s.foreground_ms, 0) * coalesce(nullif(s.bucket_ms, 0), 15000)::numeric / sum(greatest(s.foreground_ms, 0)) over (partition by s.bucket_start))
+           else round(coalesce(nullif(s.bucket_ms, 0), 15000)::numeric / count(*) over (partition by s.bucket_start)) end::bigint as dur_ms
     from samples s where s.device_id = p_device and s.dia_operativo = p_dia),
   cub as (
-    select bucket_start, bool_or(active_ms > 0) as activa
+    select bucket_start, bool_or(active_ms > 0) as activa, max(ancho_ms) as ancho_ms
     from b group by bucket_start),
   tot as (
     select coalesce(sum(foreground_ms), 0)::bigint fg, coalesce(sum(active_ms), 0)::bigint act,
@@ -572,14 +579,14 @@ begin
     from b),
   ventana as (
     select min(bucket_start) filter (where activa) pa,
-           max(bucket_start) filter (where activa) + interval '15 seconds' ua,
-           min(bucket_start) pm, max(bucket_start) + interval '15 seconds' um
+           max(bucket_start + (ancho_ms || ' milliseconds')::interval) filter (where activa) ua,
+           min(bucket_start) pm, max(bucket_start + (ancho_ms || ' milliseconds')::interval) um
     from cub),
   cubierto as (
-    select (count(*) * 15000)::bigint ms from cub, ventana where cub.bucket_start >= ventana.pa and cub.bucket_start < ventana.ua),
+    select coalesce(sum(cub.ancho_ms), 0)::bigint ms from cub, ventana where cub.bucket_start >= ventana.pa and cub.bucket_start < ventana.ua),
   gaps as (
     select coalesce(sum(extract(epoch from (bucket_start - prev_fin)) * 1000), 0)::bigint ms
-    from (select bucket_start, lag(bucket_start) over (order by bucket_start) + interval '15 seconds' prev_fin from cub) g
+    from (select bucket_start, lag(bucket_start + (ancho_ms || ' milliseconds')::interval) over (order by bucket_start) prev_fin from cub) g
     where prev_fin is not null and bucket_start - prev_fin > interval '30 seconds'),
   apps as (
     select coalesce(jsonb_object_agg(app, ms), '{}'::jsonb) j from (select app, sum(active_ms) ms from b group by app) a),
@@ -598,6 +605,8 @@ begin
           case when lag(bucket_start) over (order by bucket_start) is null
                  or bucket_start - lag(bucket_start) over (order by bucket_start) >= interval '15 minutes' then 1 else 0 end nuevo
         from cub where activa) x) y group by grp),
+  -- Una cubeta ACTIVA nunca se funde (solo se funden las que no tienen nada), así que aquí los
+  -- 15 s del final son el ancho real de la última cubeta de la isla.
   tramos as (
     select count(*)::int n, coalesce(sum(extract(epoch from (t1 - t0)) * 1000 + 15000), 0)::bigint ms from isl),
   enc as (

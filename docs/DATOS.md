@@ -79,8 +79,10 @@ la jornada (tabla `encuentros`).
 ## `muestras` — la serie de 15 s
 
 `device_id`, `consultorio_id`, `dia_operativo`, `phase`, `bucket_start` (inicio de la cubeta, alineada al
-reloj), `bucket_ms`, `seq` (segmento dentro de la cubeta al cambiar el contexto; los segmentos se
-reparten los 15 s en proporción a su `foreground_ms`), `app` (o `bloqueado`), `surface`, `encounter_key`,
+reloj), `bucket_ms` (lo que cubre la fila: 15000 lo normal, o el tramo entero cuando el medidor fundió
+cubetas seguidas en las que no pasaba nada, hasta 5 min), `seq` (segmento dentro de la cubeta al
+cambiar el contexto; los segmentos se reparten ese ancho en proporción a su `foreground_ms`),
+`app` (o `bloqueado`), `surface`, `encounter_key`,
 `sap_user`, `medico_id`, `medico`, `foreground_ms`, `active_ms`, `typing_ms`, `keystrokes`, `clicks`,
 `scroll_ticks`, `context_switches`, `sap_roundtrips`, `sap_wait_ms`, `tabs`, `enters`, `correcciones`,
 `copias`, `pegados`, `guardados`.

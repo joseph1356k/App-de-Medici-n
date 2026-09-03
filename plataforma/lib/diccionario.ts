@@ -87,7 +87,7 @@ export const DICCIONARIO = {
       campos: {
         device_id: "PC.", consultorio_id: "Consultorio o nulo.", dia_operativo: "Día operativo.", phase: "Fase de la jornada.",
         bucket_start: "Inicio de la cubeta de 15 s (ISO UTC, alineada al reloj de pared).",
-        bucket_ms: "Tamaño de la cubeta (15000).",
+        bucket_ms: "Lo que cubre esta fila en milisegundos. Normalmente 15000 (una cubeta). En los tramos donde no pasa nada —PC bloqueado, o encendido sin nadie— el medidor funde las cubetas seguidas en UNA fila que cubre todo el tramo (hasta 5 min), así una noche son unas pocas filas y no miles. El tiempo cubierto es exactamente el mismo.",
         seq: "Índice del segmento dentro de la cubeta cuando cambió el contexto a mitad (0, 1, 2…). Los segmentos se reparten los 15 s en proporción a su foreground_ms.",
         app: "Aplicación normalizada, o 'bloqueado'.", surface: "Pantalla (ver definiciones.surface).", encounter_key: "Huella del paciente o nulo.",
         sap_user: "Login SAP visto o nulo.", medico_id: "Médico del roster para ese login, o nulo.", medico: "Nombre del médico, o nulo.",
