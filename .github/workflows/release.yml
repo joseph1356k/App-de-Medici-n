@@ -45,9 +45,25 @@ jobs:
           fi
           echo "Clave presente (${#MEDIDOR_CLAVE} caracteres)."
 
+      # LA VERSIÓN SALE DE LA ETIQUETA, no del .csproj. Del v2.0.1 al v2.0.4 se publicaron cuatro
+      # versiones distintas que decían llamarse todas «2.0.0» porque nadie tocó el .csproj: el panel
+      # enseñaba una versión falsa en los tres PCs y eso mandó una investigación entera por el
+      # camino equivocado. Aquí ya no puede pasar: si la etiqueta es v2.0.5, el .exe dice 2.0.5.
+      - name: Versión a publicar
+        id: v
+        run: |
+          TAG="${{ github.event.inputs.version }}"
+          [ -z "$TAG" ] && TAG="$GITHUB_REF_NAME"
+          case "${TAG#v}" in
+            [0-9]*.[0-9]*.[0-9]*) : ;;
+            *) echo "::error::La etiqueta '$TAG' no tiene forma vN.N.N"; exit 1 ;;
+          esac
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "num=${TAG#v}" >> "$GITHUB_OUTPUT"
+
       # La clave del servidor entra AQUÍ, desde el secreto del repo, nunca desde el código. Es lo
       # que hace que el .exe publicado se instale con un doble clic, sin teclear nada.
-      - run: dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:MedidorClavePorDefecto="$MEDIDOR_CLAVE" -o salida medidor/App/App.csproj
+      - run: dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:Version="${{ steps.v.outputs.num }}" -p:MedidorClavePorDefecto="$MEDIDOR_CLAVE" -o salida medidor/App/App.csproj
         env:
           MEDIDOR_CLAVE: ${{ secrets.MEDIDOR_CLAVE }}
       - run: |
@@ -58,8 +74,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="${{ github.event.inputs.version }}"
-          [ -z "$TAG" ] && TAG="$GITHUB_REF_NAME"
+          TAG="${{ steps.v.outputs.tag }}"
           gh release create "$TAG" --target "$GITHUB_SHA" \
             salida/Medidor.exe salida/instalar.ps1 salida/desinstalar.ps1 \
             --title "Medidor $TAG" \

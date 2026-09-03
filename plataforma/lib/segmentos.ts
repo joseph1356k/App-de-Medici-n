@@ -42,19 +42,16 @@ export const anchoDe = (b: Pick<Bucket, "bucket_ms">) => (b.bucket_ms > 0 ? b.bu
 /**
  * LO QUE UNA CUBETA CUBRE DE VERDAD, que no siempre es lo que dice `bucket_ms`.
  *
- * Una cubeta se numera por el reloj de pared del PC y se llena con ticks medidos en el reloj
- * monotónico. Cuando el reloj de pared se arrastra —pasa en los PCs del HGM: el sistema corrige la
- * hora en pasitos hacia atrás, cada uno demasiado pequeño para contar como salto— los dos relojes
- * dejan de coincidir un rato y todos los ticks de ese rato caen en la MISMA cubeta. El resultado
- * es una cubeta con 180 s de `foreground_ms` dentro y ninguna cubeta hasta 180 s después.
+ * El medidor funde los tramos en los que no pasa nada en UNA fila que declara el tramo entero en
+ * `bucket_ms` (hasta 5 min). El servidor recortaba ese `bucket_ms` a 15 s al guardarlo, así que
+ * de un tramo de 3 minutos quedaba una fila de 15 s y un agujero de 2 min 45 s detrás. Con eso,
+ * las seis jornadas del estudio salían con una cobertura del 49-78 % y quedaban EXCLUIDAS, pese a
+ * estar medidas enteras.
  *
- * El tiempo NO se pierde: está medido, con su app y su actividad, dentro de esa fila (comprobado
- * en producción: la suma de `foreground_ms` del día es EXACTAMENTE la ventana del día). Lo que se
- * perdía era el dibujo y la cobertura, porque dar por hecho 15 s convertía en «sin datos» un
- * tercio de una jornada perfectamente medida.
- *
- * Así que una cubeta cubre lo que midió —el foreground de todas sus partes— con dos topes: nunca
- * menos que lo declarado, y nunca tanto como para pisar la cubeta siguiente.
+ * El recorte ya no está (lib/ingesta.ts), pero las filas guardadas antes siguen ahí con su
+ * `bucket_ms` mutilado — y su `foreground_ms` intacto, que dice cuánto midió esa fila de verdad.
+ * De ahí esta regla, que además es la correcta en general: una cubeta cubre lo que midió, con dos
+ * topes — nunca menos que lo declarado, y nunca tanto como para pisar la cubeta siguiente.
  */
 export function spanDeCubeta(partes: Pick<Bucket, "bucket_ms" | "foreground_ms">[], hastaLaSiguienteMs?: number): number {
   const declarado = Math.max(...partes.map(anchoDe));

@@ -22,6 +22,7 @@ y como una segunda valla en el servidor ([`plataforma/lib/vocabulario.ts`](../pl
 | Dato | Para qué |
 |---|---|
 | Tiempo en primer plano y activo por app, cada 15 s, siempre (bloqueado incluido) | cuánto trabajo hay, dónde, y cuándo el PC estaba ocupado, quieto, bloqueado o apagado |
+| **Nombre del programa** que estaba delante (`sapgui`, `chrome`, `acrord32`…) | poder decir en qué se va el tiempo. Es el nombre del ejecutable, en minúsculas y saneado: nunca la ruta, ni los argumentos, ni el título de la ventana. Antes lo que no estaba en un catálogo corto se agrupaba como «otro», y con eso un tercio de la jornada quedaba medido pero sin nombre |
 | Cantidad de teclas, clics, scroll; tiempo en ráfagas de tecleo; seis teclas de control | escritura y esfuerzo |
 | Identidad técnica de la pantalla SAP (`sapgui://SID/TCODE/PROGRAMA/DYNPRO`) | el recorrido por el sistema |
 | Round-trips y time-to-ready de SAP | cuánto se espera al sistema |

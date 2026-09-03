@@ -9,15 +9,18 @@ public sealed record ConfigDeNormalizacion(
     IReadOnlySet<string> DominiosPermitidos,
     IReadOnlySet<string> DominiosMiracle);
 
-/// <summary>La forma en que una superficie viaja: una clave de app de lista blanca y, si la hay,
-/// una superficie normalizada. Nunca un título.</summary>
+/// <summary>La forma en que una superficie viaja: una clave de app (la del catálogo, o el nombre
+/// del ejecutable saneado si no está en él) y, si la hay, una superficie normalizada. Nunca un
+/// título.</summary>
 public sealed record Superficie(string App, string? Surface);
 
 /// <summary>
 /// LA ADUANA DE PRIVACIDAD del medidor: todo lo que se observa pasa por aquí antes de tocar una
-/// cubeta, y de aquí solo salen claves de lista blanca. El título de la ventana entra como
-/// parámetro y se ignora a propósito — está en la firma para que quede escrito que se decidió no
-/// usarlo, no que se olvidó (en urgencias un título lleva nombre y documento).
+/// cubeta. De aquí salen dos cosas y ninguna más: claves del catálogo de apps, y el NOMBRE del
+/// ejecutable de un programa que el catálogo no conozca (`acrord32`), saneado a [a-z0-9_]. El
+/// título de la ventana entra como parámetro y se ignora a propósito — está en la firma para que
+/// quede escrito que se decidió no usarlo, no que se olvidó (en urgencias un título lleva nombre
+/// y documento).
 ///
 /// Normaliza en UN solo sitio (aprendizaje nº16: `AppDe` conserva el .exe, `ProcessFromOrigin` lo
 /// quita, y quien las junta hereda el desacuerdo): aquí el proceso siempre queda en minúscula y
@@ -37,7 +40,7 @@ public static class Normalizador
 
         var app = cfg.AppsPorProceso.TryGetValue(ClaveDeProceso(entrada.Proceso), out var conocida)
             ? conocida
-            : AppOtro;
+            : AppDeProcesoDesconocido(entrada.Proceso);
 
         if (!string.IsNullOrWhiteSpace(entrada.UrlNavegador))
         {
@@ -79,6 +82,37 @@ public static class Normalizador
         if (partes.Length < 4) return null;
         if (partes.Take(4).Any(string.IsNullOrWhiteSpace)) return null;
         return (partes[0], partes[1], partes[3]);
+    }
+
+    /// <summary>
+    /// EL NOMBRE DE UN PROCESO QUE NO ESTÁ EN EL CATÁLOGO: `AcroRd32.exe` → `acrord32`.
+    ///
+    /// Antes todo lo desconocido caía en «otro», un saco gris del que no se podía salir: en un día
+    /// del HGM «otro» llegó a 195 minutos de tiempo activo —más que SAP en ese consultorio— sin
+    /// que nadie pudiera decir qué aplicación era. Medir un tercio de la jornada y no saber a qué
+    /// llamarlo no es medir.
+    ///
+    /// Lo que viaja es SOLO el nombre del ejecutable, en minúsculas, sin la extensión, sin ruta,
+    /// sin argumentos y sin título — y saneado carácter a carácter a [a-z0-9_], que es la misma
+    /// forma que tiene una clave del catálogo. Un ejecutable con un nombre raro no puede colar
+    /// texto libre por aquí: lo que no sea letra o dígito no pasa.
+    ///
+    /// El nombre de un programa no es un dato clínico. La aduana sigue en pie para lo que sí lo
+    /// es: el título de la ventana, el contenido de los campos y las teclas no salen nunca del PC.
+    /// </summary>
+    public static string AppDeProcesoDesconocido(string proceso)
+    {
+        var p = ClaveDeProceso(proceso);
+        if (p.Length <= 4) return AppOtro;              // "" o solo ".exe"
+        var sb = new System.Text.StringBuilder(32);
+        foreach (var c in p[..^4])
+        {
+            if (c is (>= 'a' and <= 'z') or (>= '0' and <= '9')) sb.Append(c);
+            else if (c is '_' or '-' or '.' or '+' or ' ') { if (sb.Length > 0 && sb[^1] != '_') sb.Append('_'); }
+            if (sb.Length == 32) break;
+        }
+        var clave = sb.ToString().Trim('_');
+        return clave.Length == 0 ? AppOtro : clave;
     }
 
     private static string ClaveDeProceso(string proceso)

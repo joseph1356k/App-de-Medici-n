@@ -583,17 +583,16 @@ begin
       s.sap_roundtrips, s.sap_wait_ms, s.tabs, s.enters, s.correcciones, s.copias, s.pegados, s.guardados,
       coalesce(nullif(s.bucket_ms, 0), 15000)::bigint as declarado_ms
     from samples s where s.device_id = p_device and s.dia_operativo = p_dia),
-  -- CUÁNTO CUBRE UNA CUBETA DE VERDAD. Lo declarado (15 s, o el tramo entero si el medidor fundió
-  -- cubetas vacías) es un MÍNIMO, no la respuesta: una cubeta se numera con el reloj de pared del
-  -- PC y se llena con ticks medidos en el monotónico, y cuando el de pared se arrastra —los PCs
-  -- del HGM lo hacen: el sistema corrige la hora en pasitos hacia atrás, cada uno demasiado
-  -- pequeño para contar como salto— todos los ticks de ese rato caen en la MISMA cubeta. Sale una
-  -- cubeta con 180 s de foreground dentro y ninguna hasta 180 s después.
+  -- CUÁNTO CUBRE UNA CUBETA DE VERDAD. Lo declarado en bucket_ms es un MÍNIMO, no la respuesta.
+  -- El medidor funde los tramos en los que no pasa nada en UNA fila que declara el tramo entero
+  -- (hasta 5 min), y el servidor recortaba ese bucket_ms a 15 s al guardarlo: de un tramo de tres
+  -- minutos quedaba una fila de 15 s y un agujero de 2 min 45 s detrás. Con eso, las seis jornadas
+  -- del estudio salían con una cobertura del 49-78 % y quedaban excluidas, estando medidas
+  -- enteras: la suma de foreground_ms de un día es EXACTAMENTE la ventana de ese día.
   --
-  -- El tiempo no se pierde, está ahí medido: en producción la suma de foreground_ms de un día es
-  -- EXACTAMENTE la ventana de ese día. Lo que se perdía era la cobertura, que contaba filas × 15 s
-  -- y declaraba «sin datos» un tercio de una jornada entera y bien medida — y con eso la excluía
-  -- del estudio. Así que la cubeta cubre lo que midió, sin pasarse de la siguiente.
+  -- El recorte ya no está, pero las filas guardadas antes siguen con su bucket_ms mutilado y su
+  -- foreground_ms intacto. De ahí esta regla, que además es la correcta en general: la cubeta
+  -- cubre lo que midió, sin pasarse de la siguiente.
   cubx as (
     select bucket_start, bool_or(active_ms > 0) as activa,
       greatest(max(declarado_ms), coalesce(sum(greatest(foreground_ms, 0)), 0))::bigint as span_ms

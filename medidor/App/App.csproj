@@ -21,7 +21,7 @@
     <LangVersion>latest</LangVersion>
     <AssemblyName>Medidor</AssemblyName>
     <RootNamespace>Medidor.App</RootNamespace>
-    <Version>2.0.0</Version>
+    <Version>2.0.5</Version>
     <Product>Medidor de trabajo clínico</Product>
     <Company>Miracle</Company>
     <ApplicationIcon>iconos\medidor.ico</ApplicationIcon>

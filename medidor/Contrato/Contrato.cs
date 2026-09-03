@@ -28,7 +28,7 @@ internal static class Contrato
         Console.WriteLine("CONTRATO DEL MEDIDOR (el instrumento, aislado)\n");
 
         Prueba("1. un lote serializado jamás contiene el título de la ventana de entrada; el usuario SAP sí viaja", TituloJamasEnElLote);
-        Prueba("2. una app fuera de la lista blanca sale como «otro», y una web solo sale como dominio permitido", FueraDeListaEsOtro);
+        Prueba("2. una app fuera del catálogo viaja con el nombre de su .exe (nunca su título), y una web solo sale como dominio permitido", FueraDeListaViajaPorSuNombre);
         Prueba("3. la identidad SAP viaja sin el sufijo vista: y sin el título de la ventana", SapSinVistaNiTitulo);
         Prueba("4. del identificador de paciente solo sale la huella: el crudo no sobrevive, y normalizar quita los ceros de la izquierda", SoloSaleLaHuella);
         Prueba("5. la clave de la huella es la del día operativo que corta a las 06:00, y la jornada cambia ahí sola", LaClaveEsDelDiaOperativo);
@@ -143,12 +143,22 @@ internal static class Contrato
         Debe(lote.Contains("\"reason\":\"regla\""), "del detail sobrevive lo de la lista blanca");
     }
 
-    private static void FueraDeListaEsOtro()
+    private static void FueraDeListaViajaPorSuNombre()
     {
         var cfg = Config();
         var rara = Normalizador.Normalizar(new EntradaDeSuperficie("hcvieja.exe", "lo que sea", null, null), cfg);
-        Debe(rara.App == Normalizador.AppOtro, "una app desconocida es «otro»");
+        Debe(rara.App == "hcvieja", "una app fuera del catálogo viaja con el nombre de su ejecutable, no en un saco «otro»");
         Debe(rara.Surface == null, "y no lleva superficie");
+
+        // Lo que viaja es el NOMBRE del .exe y nada más: ni ruta, ni argumentos, ni título, y
+        // saneado a la misma forma que una clave del catálogo ([a-z0-9_], 32 como mucho).
+        Debe(Normalizador.AppDeProcesoDesconocido("AcroRd32.EXE") == "acrord32", "mayúsculas y extensión fuera");
+        Debe(Normalizador.AppDeProcesoDesconocido("ms-teams.exe") == "ms_teams", "los separadores se normalizan a _");
+        Debe(Normalizador.AppDeProcesoDesconocido("Historia Clínica de Juan.exe") == "historia_clnica_de_juan",
+            "de un nombre con acentos y espacios solo sobrevive [a-z0-9_]: por aquí no entra texto libre");
+        Debe(Normalizador.AppDeProcesoDesconocido(new string('x', 60) + ".exe").Length == 32, "y nunca pasa de 32 caracteres");
+        Debe(Normalizador.AppDeProcesoDesconocido("") == Normalizador.AppOtro, "sin nombre de proceso sí queda «otro»");
+        Debe(Normalizador.AppDeProcesoDesconocido("电脑.exe") == Normalizador.AppOtro, "un nombre sin una sola letra ASCII también");
 
         var noPermitido = Normalizador.Normalizar(new EntradaDeSuperficie("chrome.exe", "x", "https://facebook.com/algo", null), cfg);
         Debe(noPermitido.App == "chrome" && noPermitido.Surface == null, "una web fuera de la lista es el navegador a secas, sin dominio");
