@@ -112,7 +112,9 @@ export const ETIQUETA_APP: Record<string, string> = {
   ie: "Internet Explorer", webview: "Web incrustada",
   office: "Office", outlook: "Correo (Outlook)", teams: "Teams", whatsapp: "WhatsApp",
   zoom: "Zoom", slack: "Slack", skype: "Skype", pdf: "PDF",
-  explorador: "Explorador de archivos", escritorio: "Escritorio de Windows", notas: "Accesorios",
+  explorador: "Explorador de archivos", escritorio: "Escritorio de Windows",
+  notepad: "Bloc de notas", wordpad: "WordPad", paint: "Paint", calculadora: "Calculadora",
+  notas_rapidas: "Notas rápidas", recortes: "Recortes",
   remoto: "Escritorio remoto", java: "Aplicación Java", medios: "Fotos y vídeo", archivos: "Comprimidos",
   uexe: "Ü (asistente)",
 };
