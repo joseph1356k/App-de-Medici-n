@@ -21,6 +21,12 @@ export const LIMITES = { jornadas: 50, muestras: 2000, eventos: 1000, visitas: 6
 export type Coleccion = keyof typeof LIMITES;
 export const COLECCIONES = Object.keys(LIMITES) as Coleccion[];
 export const CUBETA_MS = 15_000;
+/** Tope del ancho de UNA fila. El medidor funde en una sola fila los tramos en los que no pasa
+ * nada (un PC bloqueado toda la noche son unas pocas filas, no miles), y esa fila declara en
+ * `bucket_ms` el tramo entero. Recortarlo a 15 s —como se hacía— borraba horas de tiempo medido
+ * en el momento de guardarlo. Seis horas es el techo del tramo más largo que el medidor puede
+ * emitir con mucho margen; por encima es una fila corrupta, no un tramo. */
+export const TRAMO_MAX_MS = 6 * 60 * 60 * 1000;
 
 export class FilaInvalida extends Error {}
 
@@ -163,7 +169,7 @@ export function filaMuestra(ctx: Contexto, r: Crudo): FilaMuestra {
     spool_seq: spoolSeqDe(r), device_id: ctx.deviceId, consultorio_id: ctx.consultorioId,
     dia_operativo: diaOperativo(r, bucketStart),
     bucket_start: bucketStart,
-    bucket_ms: Math.min(cuenta(r.bucket_ms), CUBETA_MS), seq: Math.min(cuenta(r.seq), 32767),
+    bucket_ms: Math.min(cuenta(r.bucket_ms), TRAMO_MAX_MS), seq: Math.min(cuenta(r.seq), 32767),
     app,
     // Un PC bloqueado no tiene pantalla, ni paciente, ni usuario: si el .exe los mandara,
     // aquí se limpian. Y activo 0: nadie está trabajando en una pantalla de bloqueo.

@@ -306,7 +306,7 @@ export async function porApp(f: Filtros): Promise<FilaApp[]> {
     select a.key as app, sum(a.value::bigint)::bigint as ms, count(*)::int as jornadas
     from jornada_summary j, lateral jsonb_each_text(j.activo_por_app) a
     where ${buenas(f)} and a.key <> 'bloqueado'
-    group by a.key order by sum(a.value::bigint) desc limit 8`;
+    group by a.key order by sum(a.value::bigint) desc limit 14`;
 }
 
 export type FilaAppDetalle = {
@@ -331,7 +331,35 @@ export async function porAppDetalle(f: Filtros): Promise<FilaAppDetalle[]> {
     where ${buenas(f)} and a.key <> 'bloqueado'
     group by a.key
     order by sum(coalesce((a.value->>'activo_ms')::bigint, 0)) desc
-    limit 12`;
+    limit 30`;
+}
+
+export type FilaAppConsultorio = { consultorio_id: string | null; nombre: string; orden: number; app: string; activo_ms: number };
+
+/** El reparto por app DE CADA CONSULTORIO, para ponerlos uno al lado de otro: la misma tarta
+ * repetida tres veces es la forma más directa de ver que en el 2 se va el tiempo donde en el 1
+ * no. Solo las apps con algo de tiempo; `bloqueado` es un estado, no una app. */
+export async function porAppYConsultorio(f: Filtros): Promise<FilaAppConsultorio[]> {
+  return sql<FilaAppConsultorio[]>`
+    select j.consultorio_id, coalesce(c.nombre, 'Sin consultorio') as nombre, coalesce(c.orden, 999) as orden,
+      a.key as app, sum(a.value::bigint)::bigint as activo_ms
+    from jornada_summary j left join consultorios c on c.id = j.consultorio_id, lateral jsonb_each_text(j.activo_por_app) a
+    where ${buenas(f)} and a.key <> 'bloqueado' and a.value::bigint > 0
+    group by j.consultorio_id, c.nombre, c.orden, a.key
+    order by orden, nombre, sum(a.value::bigint) desc`;
+}
+
+export type FilaHoraConsultorio = { consultorio_id: string | null; nombre: string; orden: number; hora: string; activo_ms: number };
+
+/** La forma del día de cada consultorio. Mismo eje para los tres: así se comparan de verdad. */
+export async function porHoraYConsultorio(f: Filtros): Promise<FilaHoraConsultorio[]> {
+  return sql<FilaHoraConsultorio[]>`
+    select j.consultorio_id, coalesce(c.nombre, 'Sin consultorio') as nombre, coalesce(c.orden, 999) as orden,
+      h.key as hora, sum(h.value::bigint)::bigint as activo_ms
+    from jornada_summary j left join consultorios c on c.id = j.consultorio_id, lateral jsonb_each_text(j.por_hora) h
+    where ${buenas(f)}
+    group by j.consultorio_id, c.nombre, c.orden, h.key
+    order by orden, nombre, h.key`;
 }
 
 export type FilaHora = { hora: string; activo_ms: number; jornadas: number };

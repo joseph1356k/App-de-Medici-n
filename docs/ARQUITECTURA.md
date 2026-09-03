@@ -105,7 +105,8 @@ Bogotá, después del corte). `algo_version` permite recomputar todo si cambia u
 (`/api/tareas/resumir?todo=1`).
 
 **Calidad como filtro, no como nota al pie.** `calidad_ok` = nada descartado en el PC, reloj estable
-(≤ 2 saltos) y cobertura ≥ 80 % de la ventana de actividad. `calidad_motivos` dice por qué una jornada
+(≤ 2 saltos) y cobertura ≥ 80 % de la ventana de actividad — donde una cubeta cubre lo que declara o lo
+que midió, lo que sea mayor. `calidad_motivos` dice por qué una jornada
 quedó fuera; el panel lo muestra como alerta y el bloque de cobertura dice cuántas se excluyeron.
 
 ## Lo que promete el contrato (`medidor/Contrato`)

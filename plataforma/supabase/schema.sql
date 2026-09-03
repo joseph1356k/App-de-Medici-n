@@ -54,11 +54,39 @@ alter table settings enable row level security;
 
 insert into settings (id, hospital, config_version, config)
 values (1, 'Hospital General de Medellín', 1, jsonb_build_object(
-  'apps_por_proceso', jsonb_build_object(
-    'saplogon.exe','sap','saplgpad.exe','sap','sapgui.exe','sap',
-    'chrome.exe','chrome','msedge.exe','edge','firefox.exe','firefox',
-    'winword.exe','office','excel.exe','office','outlook.exe','office',
-    'explorer.exe','explorador','u.exe','uexe'),
+  -- QUÉ PROCESO ES QUÉ APP. Lo que no esté en esta lista viaja con el nombre de su .exe (medidor
+  -- 2.0.5 en adelante) o como «otro» (2.0.0–2.0.4). En los dos casos el TIEMPO se mide igual; lo
+  -- que solo da esta lista es un nombre estable y un color fijo en el panel, y agrupar varios
+  -- procesos en una misma app (los seis Office, los cuatro SAP). Se amplía en caliente desde
+  -- Configuración → config del medidor: los PCs la obedecen en el siguiente latido, sin reinstalar.
+  'apps_por_proceso', '{
+    "saplogon.exe":"sap", "saplgpad.exe":"sap", "sapgui.exe":"sap",
+    "sapshcut.exe":"sap", "chrome.exe":"chrome", "msedge.exe":"edge",
+    "firefox.exe":"firefox", "brave.exe":"brave", "opera.exe":"opera",
+    "iexplore.exe":"ie", "msedgewebview2.exe":"webview", "winword.exe":"office",
+    "excel.exe":"office", "powerpnt.exe":"office", "onenote.exe":"office",
+    "msaccess.exe":"office", "mspub.exe":"office", "outlook.exe":"outlook",
+    "olk.exe":"outlook", "teams.exe":"teams", "ms-teams.exe":"teams",
+    "msteams.exe":"teams", "lync.exe":"teams", "whatsapp.exe":"whatsapp",
+    "zoom.exe":"zoom", "slack.exe":"slack", "skype.exe":"skype",
+    "acrord32.exe":"pdf", "acrobat.exe":"pdf", "foxitreader.exe":"pdf",
+    "foxitphantompdf.exe":"pdf", "sumatrapdf.exe":"pdf", "pdfxedit.exe":"pdf",
+    "explorer.exe":"explorador", "searchapp.exe":"escritorio", "searchhost.exe":"escritorio",
+    "searchui.exe":"escritorio", "shellexperiencehost.exe":"escritorio", "startmenuexperiencehost.exe":"escritorio",
+    "applicationframehost.exe":"escritorio", "lockapp.exe":"escritorio", "logonui.exe":"escritorio",
+    "textinputhost.exe":"escritorio", "systemsettings.exe":"escritorio", "sihost.exe":"escritorio",
+    "ctfmon.exe":"escritorio", "dwm.exe":"escritorio", "rundll32.exe":"escritorio",
+    "taskmgr.exe":"escritorio", "control.exe":"escritorio", "cmd.exe":"escritorio",
+    "powershell.exe":"escritorio", "windowsterminal.exe":"escritorio", "notepad.exe":"notas",
+    "wordpad.exe":"notas", "mspaint.exe":"notas", "calc.exe":"notas",
+    "calculator.exe":"notas", "stickynot.exe":"notas", "snippingtool.exe":"notas",
+    "mstsc.exe":"remoto", "wfica32.exe":"remoto", "cdviewer.exe":"remoto",
+    "vmware-view.exe":"remoto", "anydesk.exe":"remoto", "teamviewer.exe":"remoto",
+    "javaw.exe":"java", "java.exe":"java", "jp2launcher.exe":"java",
+    "vlc.exe":"medios", "wmplayer.exe":"medios", "microsoft.photos.exe":"medios",
+    "video.ui.exe":"medios", "winrar.exe":"archivos", "7zfm.exe":"archivos",
+    "7zg.exe":"archivos", "u.exe":"uexe"
+  }'::jsonb,
   'dominios_permitidos', jsonb_build_array(),
   'dominios_miracle', jsonb_build_array('itsmiracleai.com.co','www.itsmiracleai.com.co'),
   'reglas_identidad', jsonb_build_array(
@@ -446,7 +474,7 @@ begin
 end;
 $$;
 
--- EL RESUMEN de una jornada desde el crudo (algo_version = 2): primero los ENCUENTROS (una fila
+-- EL RESUMEN de una jornada desde el crudo (algo_version = 3): primero los ENCUENTROS (una fila
 -- por paciente) y después la jornada, que lee de ellos. Recomputable: cambiar una definición y
 -- volver a correr no pierde nada. Con p_min_intervalo > 0 hace de acelerador: si se resumió
 -- hace menos, solo la marca sucia y devuelve false (la ingesta lo llama cada minuto; el cron
@@ -494,11 +522,11 @@ begin
     tramos, post_atencion_ms, siguiente_ms, visitas, pantallas_distintas, sap_wait_ms, ready_ms_p50, sap_user)
   with b as (
     select bucket_start, seq, app, encounter_key, sap_user, active_ms, typing_ms, keystrokes, clicks, tabs, enters, correcciones, copias, pegados, guardados,
-      coalesce(nullif(bucket_ms, 0), 15000)::bigint as ancho_ms
+      greatest(coalesce(nullif(bucket_ms, 0), 15000), greatest(foreground_ms, 0))::bigint as ancho_ms
     from samples s where s.device_id = p_device and s.dia_operativo = p_dia and s.encounter_key is not null),
   pac as (
-    -- El paciente pudo quedarse abierto mientras nadie tocaba el PC: esa cubeta fundida cuenta con
-    -- su ancho real, no con 15 s.
+    -- El paciente pudo quedarse abierto mientras nadie tocaba el PC: esa cubeta cuenta con lo que
+    -- cubre de verdad (lo declarado, o lo medido si es mas), no con 15 s de oficio.
     select encounter_key, min(bucket_start) primera, max(bucket_start + (ancho_ms || ' milliseconds')::interval) ultima,
       sum(active_ms)::bigint act, coalesce(sum(active_ms) filter (where app = 'sap'), 0)::bigint his, coalesce(sum(active_ms) filter (where app = 'miracle_web'), 0)::bigint mir,
       sum(typing_ms)::bigint typ, sum(keystrokes)::bigint ks, sum(clicks)::bigint cl,
@@ -549,23 +577,39 @@ begin
     tramos, tramos_ms, procesos, app_version,
     pre_atencion_ms, cola_post_jornada_ms, consulta_ms_p25, consulta_ms_p75, por_app, por_hora,
     calidad, calidad_ok, calidad_motivos, sucia, resumido_en, algo_version)
-  with b as (
-    -- Las cubetas del día. Dentro de una cubeta las partes (seq) se reparten los 15 s en
-    -- proporción a su foreground: así bloqueado/inactivo suman tiempo real, no filas.
+  with fila as (
     select s.bucket_start, s.seq, s.app, s.surface, s.encounter_key, s.sap_user,
       s.foreground_ms, s.active_ms, s.typing_ms, s.keystrokes, s.clicks, s.scroll_ticks, s.context_switches,
       s.sap_roundtrips, s.sap_wait_ms, s.tabs, s.enters, s.correcciones, s.copias, s.pegados, s.guardados,
-      -- El ancho de una fila es su bucket_ms: 15 s lo normal, o el tramo entero cuando el medidor
-      -- fundió cubetas en las que no pasaba nada (una noche bloqueado son unas pocas filas). Dar
-      -- por hecho 15 s aquí se comería ese tiempo de bloqueado_ms, inactivo_ms y la cobertura.
-      coalesce(nullif(s.bucket_ms, 0), 15000)::bigint as ancho_ms,
-      case when sum(greatest(s.foreground_ms, 0)) over (partition by s.bucket_start) > 0
-           then round(greatest(s.foreground_ms, 0) * coalesce(nullif(s.bucket_ms, 0), 15000)::numeric / sum(greatest(s.foreground_ms, 0)) over (partition by s.bucket_start))
-           else round(coalesce(nullif(s.bucket_ms, 0), 15000)::numeric / count(*) over (partition by s.bucket_start)) end::bigint as dur_ms
+      coalesce(nullif(s.bucket_ms, 0), 15000)::bigint as declarado_ms
     from samples s where s.device_id = p_device and s.dia_operativo = p_dia),
+  -- CUÁNTO CUBRE UNA CUBETA DE VERDAD. Lo declarado (15 s, o el tramo entero si el medidor fundió
+  -- cubetas vacías) es un MÍNIMO, no la respuesta: una cubeta se numera con el reloj de pared del
+  -- PC y se llena con ticks medidos en el monotónico, y cuando el de pared se arrastra —los PCs
+  -- del HGM lo hacen: el sistema corrige la hora en pasitos hacia atrás, cada uno demasiado
+  -- pequeño para contar como salto— todos los ticks de ese rato caen en la MISMA cubeta. Sale una
+  -- cubeta con 180 s de foreground dentro y ninguna hasta 180 s después.
+  --
+  -- El tiempo no se pierde, está ahí medido: en producción la suma de foreground_ms de un día es
+  -- EXACTAMENTE la ventana de ese día. Lo que se perdía era la cobertura, que contaba filas × 15 s
+  -- y declaraba «sin datos» un tercio de una jornada entera y bien medida — y con eso la excluía
+  -- del estudio. Así que la cubeta cubre lo que midió, sin pasarse de la siguiente.
+  cubx as (
+    select bucket_start, bool_or(active_ms > 0) as activa,
+      greatest(max(declarado_ms), coalesce(sum(greatest(foreground_ms, 0)), 0))::bigint as span_ms
+    from fila group by bucket_start),
   cub as (
-    select bucket_start, bool_or(active_ms > 0) as activa, max(ancho_ms) as ancho_ms
-    from b group by bucket_start),
+    select bucket_start, activa,
+      least(span_ms, coalesce((extract(epoch from (lead(bucket_start) over (order by bucket_start) - bucket_start)) * 1000)::bigint, span_ms))::bigint as ancho_ms
+    from cubx),
+  b as (
+    -- Dentro de una cubeta las partes (seq) se reparten ese ancho en proporción a su foreground:
+    -- así bloqueado/inactivo suman tiempo real, no filas.
+    select f.*, c.ancho_ms,
+      case when sum(greatest(f.foreground_ms, 0)) over (partition by f.bucket_start) > 0
+           then round(greatest(f.foreground_ms, 0) * c.ancho_ms::numeric / sum(greatest(f.foreground_ms, 0)) over (partition by f.bucket_start))
+           else round(c.ancho_ms::numeric / count(*) over (partition by f.bucket_start)) end::bigint as dur_ms
+    from fila f join cub c on c.bucket_start = f.bucket_start),
   tot as (
     select coalesce(sum(foreground_ms), 0)::bigint fg, coalesce(sum(active_ms), 0)::bigint act,
       coalesce(sum(active_ms) filter (where app = 'sap'), 0)::bigint his,
@@ -599,16 +643,15 @@ begin
   users as (
     select coalesce(jsonb_object_agg(sap_user, ms), '{}'::jsonb) j from (select sap_user, sum(active_ms) ms from b where sap_user is not null group by sap_user) u),
   isl as (
-    select grp, min(bucket_start) t0, max(bucket_start) t1 from (
-      select bucket_start, sum(nuevo) over (order by bucket_start) grp from (
-        select bucket_start,
+    select grp, min(bucket_start) t0, max(bucket_start + (ancho_ms || ' milliseconds')::interval) t1 from (
+      select bucket_start, ancho_ms, sum(nuevo) over (order by bucket_start) grp from (
+        select bucket_start, ancho_ms,
           case when lag(bucket_start) over (order by bucket_start) is null
                  or bucket_start - lag(bucket_start) over (order by bucket_start) >= interval '15 minutes' then 1 else 0 end nuevo
         from cub where activa) x) y group by grp),
-  -- Una cubeta ACTIVA nunca se funde (solo se funden las que no tienen nada), así que aquí los
-  -- 15 s del final son el ancho real de la última cubeta de la isla.
+  -- La isla acaba donde acaba su última cubeta: con el ancho real de esa cubeta, no con 15 s fijos.
   tramos as (
-    select count(*)::int n, coalesce(sum(extract(epoch from (t1 - t0)) * 1000 + 15000), 0)::bigint ms from isl),
+    select count(*)::int n, coalesce(sum(extract(epoch from (t1 - t0)) * 1000), 0)::bigint ms from isl),
   enc as (
     select count(*)::int pacientes,
       (percentile_cont(0.5) within group (order by consulta_ms::double precision))::bigint consulta_p50,
@@ -672,7 +715,7 @@ begin
       case when cal.jumps > 2 then 'clock_jumps' end,
       case when ventana.pa is not null and coalesce(calc.cobertura, 0) < 80 then 'cobertura' end,
       case when ventana.pa is null then 'sin_actividad' end], null::text),
-    false, now(), 2
+    false, now(), 3
   from tot, ventana, cubierto, gaps, apps, detalle, horas, users, tramos, enc, entre, extra, vis, cal, calc
   on conflict (device_id, dia_operativo) do update set
     consultorio_id = excluded.consultorio_id, phase = excluded.phase,

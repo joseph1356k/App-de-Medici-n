@@ -34,6 +34,10 @@
   --color-s6: #008300;
   --color-s7: #4a3aa7;
   --color-s8: #e34948;
+  --color-s9: #0f766e;
+  --color-s10: #a16207;
+  --color-s11: #9333ea;
+  --color-s12: #0e7490;
   --color-otro: #b5b3ab;
 
   /* Los estados de la línea de tiempo, ordenados por luminancia (activo oscuro y saturado,
@@ -88,6 +92,25 @@ body { background: var(--color-plane); color: var(--color-ink); }
 .barra-pista { display: block; min-width: 3rem; height: 0.5rem; border-radius: 999px; background: var(--color-plane); box-shadow: inset 0 0 0 1px var(--color-line); }
 .barra-pista > span { display: block; height: 100%; min-width: 2px; border-radius: 999px; background: var(--color-s1); }
 /* La fila de 24 horas: una columna por hora, la barra crece desde abajo. */
+/* La forma del dia en la pagina de Datos: una columna por hora y, dentro, una barra por
+   consultorio. Mismo eje para todos: es lo unico que hace comparables dos consultorios. */
+.grafico-horas { display: flex; align-items: stretch; gap: 3px; }
+.grafico-horas__col { flex: 1 1 0; display: flex; flex-direction: column; min-width: 0; }
+.grafico-horas__barras { flex: 1; display: flex; align-items: flex-end; gap: 1px; background: var(--color-plane); border-radius: 3px; padding: 0 1px; }
+.grafico-horas__barras > span { flex: 1 1 0; display: block; min-height: 0; border-radius: 2px 2px 0 0; }
+.grafico-horas__eje { margin-top: 3px; font-size: 10px; text-align: center; color: var(--color-muted); font-variant-numeric: tabular-nums; }
+
+/* La rejilla de comparacion: una fila por metrica, una columna por consultorio y la referencia
+   del conjunto. La barra dice la desviacion respecto a esa referencia, no el valor absoluto. */
+.desvio { display: block; position: relative; height: 0.5rem; border-radius: 999px; background: var(--color-plane); box-shadow: inset 0 0 0 1px var(--color-line); }
+.desvio::before { content: ""; position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: var(--color-axis); }
+.desvio > span { position: absolute; top: 0; height: 100%; min-width: 2px; border-radius: 999px; }
+
+.segmentos { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 3px; border-radius: 0.75rem; background: var(--color-plane); border: 1px solid var(--color-line); }
+.segmentos > a { border-radius: 0.55rem; padding: 0.3rem 0.75rem; font-size: 0.875rem; color: var(--color-secondary); white-space: nowrap; }
+.segmentos > a:hover { background: var(--color-surface); color: var(--color-ink); }
+.segmentos > a[aria-current="true"] { background: var(--color-ink); color: #fff; }
+
 .horas { display: grid; grid-template-columns: repeat(24, minmax(0, 1fr)); gap: 2px; align-items: end; }
 .horas__barra { display: flex; align-items: flex-end; height: 5rem; background: var(--color-plane); border-radius: 3px; }
 .horas__barra > span { display: block; width: 100%; min-height: 1px; border-radius: 3px 3px 0 0; background: var(--color-estado-activo); }

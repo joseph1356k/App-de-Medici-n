@@ -30,7 +30,7 @@ persona o una IA entienda cada campo sin más contexto.
 | `post_atencion_ms` | Tiempo activo atribuido a un paciente **después** de que se abrió otro paciente distinto: lo que se hace sobre A cuando ya se está con B. |
 | `ready_ms` | Time-to-ready: de la llegada a una pantalla SAP al primer fin de round-trip sin estar ocupado. Nulo (no cero) si nunca llegó. |
 | `sap_wait_ms` | Suma de round-trips al servidor SAP (StartRequest → EndRequest): tiempo esperando al sistema. |
-| `cobertura_pct` | Porcentaje de la ventana de actividad (de la primera a la última cubeta activa del día) que tiene cubetas. Baja si el PC se apaga o suspende o el medidor muere en medio del día. |
+| `cobertura_pct` | Porcentaje de la ventana de actividad (de la primera a la última cubeta activa del día) que llegó **medido**. Una cubeta cubre lo que dice `bucket_ms` o lo que suman sus `foreground_ms` si es más — lo segundo pasa cuando el reloj de pared del PC se arrastra y varios minutos de ticks caen en la misma cubeta: el tiempo está medido, solo que en una fila. Baja de verdad cuando el PC se apaga o suspende o el medidor muere en medio del día. |
 | `calidad_ok` | `spool_dropped = 0` y `clock_jumps <= 2` y `cobertura_pct >= 80` (y hubo actividad). `calidad_motivos` dice por qué no. |
 | `encounter_key` | Huella HMAC-SHA256 (32 hex) del identificador del paciente, calculada en el PC con una clave por día operativo. |
 | `surface` | `sapgui://SISTEMA/TRANSACCION/PROGRAMA/DYNPRO[/subpantalla]`, `web://dominio`, o nulo. |

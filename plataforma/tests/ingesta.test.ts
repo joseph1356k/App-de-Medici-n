@@ -3,7 +3,7 @@
 // del .exe (medidor/Contrato) del lado servidor.
 import { describe, it, expect } from "vitest";
 import {
-  LIMITES, construir, diaOperativo, filaEvento, filaJornada, filaMuestra, filaVisita, sapUser, tomar, uid,
+  LIMITES, TRAMO_MAX_MS, construir, diaOperativo, filaEvento, filaJornada, filaMuestra, filaVisita, sapUser, tomar, uid,
   type Contexto, type Rechazo,
 } from "../lib/ingesta";
 import { saneaDetalle, surfaceValida, esEncounterKey } from "../lib/vocabulario";
@@ -145,5 +145,24 @@ describe("idempotencia y robustez del lote", () => {
   it("la app se normaliza a minúscula y un nombre raro se rechaza", () => {
     expect(filaMuestra(ctx, { spool_seq: 1, bucket_start: T, app: "SAP" }).app).toBe("sap");
     expect(() => filaMuestra(ctx, { spool_seq: 1, bucket_start: T, app: "Juan Pérez.exe" })).toThrow(/app/);
+  });
+});
+
+// EL ANCHO DE UNA FILA. El medidor funde en UNA fila los tramos en los que no pasa nada (un PC
+// bloqueado toda la noche son unas pocas filas, no miles) y declara el tramo entero en
+// `bucket_ms`. Recortarlo a 15 s al guardarlo —como se hacía— borraba horas de tiempo medido.
+describe("el ancho declarado de una fila", () => {
+  it("un tramo fundido de 5 minutos se guarda entero, no recortado a 15 s", () => {
+    const m = filaMuestra(ctx, { spool_seq: 1, bucket_start: T, app: "bloqueado", bucket_ms: 300_000, foreground_ms: 300_000 });
+    expect(m.bucket_ms).toBe(300_000);
+  });
+
+  it("una fila sin ancho declarado vale una cubeta", () => {
+    expect(filaMuestra(ctx, { spool_seq: 1, bucket_start: T, app: "sap" }).bucket_ms).toBe(0);
+  });
+
+  it("pero un ancho imposible se corta: eso ya no es un tramo, es una fila corrupta", () => {
+    const m = filaMuestra(ctx, { spool_seq: 1, bucket_start: T, app: "bloqueado", bucket_ms: 99 * 3600_000 });
+    expect(m.bucket_ms).toBe(TRAMO_MAX_MS);
   });
 });

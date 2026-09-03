@@ -120,3 +120,39 @@ describe("medicosVistos", () => {
     ]);
   });
 });
+
+// EL RELOJ DE PARED QUE SE ARRASTRA. Los PCs del HGM numeran las cubetas con la hora del
+// sistema y las llenan con ticks medidos en el reloj monotónico; cuando la hora del sistema se
+// corrige hacia atrás en pasitos, todos los ticks de ese rato caen en la MISMA cubeta y la
+// siguiente aparece minutos después. El tiempo está medido —dentro de esa fila— y el dibujo
+// tiene que enseñarlo, no convertirlo en un agujero de «sin datos».
+describe("una cubeta cubre lo que midió, no lo que suponemos", () => {
+  it("una cubeta con 180 s de foreground cubre 180 s, y no abre un hueco hasta la siguiente", () => {
+    const segs = segmentar([
+      cubeta(0),
+      { ...cubeta(1), foreground_ms: 180_000, active_ms: 0 },   // 12 cubetas de ticks en una fila
+      cubeta(13),                                               // la siguiente, 180 s después
+    ]);
+    expect(segs.some((s) => s.estado === "sin_datos")).toBe(false);
+    expect(dur(segs[1])).toBe(180_000);
+    expect(Date.parse(segs[1].fin)).toBe(Date.parse(segs[2].inicio));
+  });
+
+  it("pero nunca se pasa de la cubeta siguiente: si la siguiente llega a los 15 s, cubre 15 s", () => {
+    const segs = segmentar([
+      { ...cubeta(0), foreground_ms: 180_000, active_ms: 0, app: "chrome", surface: null },
+      cubeta(1),
+    ]);
+    expect(dur(segs[0])).toBe(15_000);
+  });
+
+  it("un hueco de verdad (sin cubetas y sin foreground que lo explique) sigue siendo «sin datos»", () => {
+    const segs = segmentar([cubeta(0), cubeta(20)]);
+    expect(segs.map((s) => s.estado)).toEqual(["activo", "sin_datos", "activo"]);
+  });
+
+  it("la última cubeta no tiene siguiente que la limite: cubre lo que midió", () => {
+    const segs = segmentar([cubeta(0), { ...cubeta(1), foreground_ms: 120_000, active_ms: 0, app: "chrome", surface: null }]);
+    expect(dur(segs[1])).toBe(120_000);
+  });
+});

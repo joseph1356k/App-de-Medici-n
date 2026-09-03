@@ -270,8 +270,8 @@ function Leyenda({ visibles, hayHueco, grupos, pacientes, visitas }: { visibles:
       {(["activo", "inactivo", "bloqueado"] as Estado[]).map((e) => <span key={e}><Muestra color={COLOR_ESTADO[e]} />{ETIQUETA_ESTADO[e]}</span>)}
       {hayHueco && <span><Muestra rayado />Sin datos (PC apagado, suspendido o medidor caído)</span>}
       <span className="text-muted">·</span>
-      {visibles.filter((a) => a !== "otro").map((a) => <span key={a}><Muestra color={colorApp(a)} />{etiquetaApp(a)}</span>)}
-      <span><Muestra color="var(--color-otro)" />Otras apps</span>
+      {visibles.map((a) => <span key={a}><Muestra color={colorApp(a)} />{etiquetaApp(a)}</span>)}
+      <span title="Apps que no salen en la lista de arriba porque ocuparon poco tiempo. Cada una viaja con su nombre; se ven todas en Datos → Por app."><Muestra color="var(--color-otro)" />el resto de apps</span>
       {visitas && <><span className="text-muted">·</span><span><Muestra color="var(--color-accent-soft)" />pantalla SAP</span><span><Muestra color="var(--color-accent)" />espera al servidor</span></>}
       {pacientes && <><span className="text-muted">·</span><span><Muestra color="var(--color-pac-a)" /><Muestra color="var(--color-pac-b)" />pacientes P1, P2… (huellas, no nombres)</span></>}
       {kinds.length > 0 && (

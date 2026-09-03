@@ -39,6 +39,12 @@ export function finDiaOperativo(fecha: string): string {
   return new Date(new Date(`${fecha}T06:00:00-05:00`).getTime() + 24 * 3600_000).toISOString();
 }
 
+/** Cuántos días hay de `a` a `b`, ambos inclusive (mismo día = 1). */
+export function diasEntre(a: string, b: string): number {
+  const ms = Date.parse(b + "T12:00:00Z") - Date.parse(a + "T12:00:00Z");
+  return Math.round(ms / 86400000) + 1;
+}
+
 export function sumarDias(fecha: string, n: number): string {
   const d = new Date(fecha + "T12:00:00Z");
   d.setUTCDate(d.getUTCDate() + n);

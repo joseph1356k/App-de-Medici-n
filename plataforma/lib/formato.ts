@@ -59,6 +59,12 @@ export function fmtFecha(iso: string | Date | null | undefined): string {
   return new Intl.DateTimeFormat("es-CO", { timeZone: TZ, weekday: "short", day: "2-digit", month: "short" }).format(d);
 }
 
+/** «03 sept», para el eje de un gráfico: sin día de la semana y sin año. */
+export function fmtDiaCorto(iso: string): string {
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(iso) ? new Date(iso + "T12:00:00Z") : new Date(iso);
+  return new Intl.DateTimeFormat("es-CO", { timeZone: TZ, day: "2-digit", month: "short" }).format(d);
+}
+
 export function fmtRelativo(iso: string | Date | null | undefined): string {
   if (!iso) return "nunca";
   const ms = Date.now() - new Date(iso).getTime();
@@ -96,27 +102,46 @@ export const COLOR_ESTADO: Record<Estado | "sin_pc", string> = {
   bloqueado: "var(--color-estado-bloqueado)", sin_datos: "var(--color-estado-sin-datos)", sin_pc: "var(--color-estado-sin-datos)",
 };
 
+// Las apps del catálogo (`apps_por_proceso` en Configuración), en palabras. Una clave que no
+// esté aquí es un proceso que el medidor vio y el catálogo no conoce: viaja con el nombre de su
+// .exe y se muestra tal cual, capitalizado. Eso es lo que sustituyó al saco de «Otras apps»:
+// antes todo lo desconocido caía en un gris sin nombre y no había forma de saber qué era.
 export const ETIQUETA_APP: Record<string, string> = {
-  sap: "SAP (HIS)", miracle_web: "Miracle", chrome: "Chrome", edge: "Edge", firefox: "Firefox",
-  office: "Office", uexe: "Ü (asistente)", explorador: "Explorador", otro: "Otras apps", bloqueado: "Bloqueado",
+  sap: "SAP (HIS)", miracle_web: "Miracle", bloqueado: "Bloqueado", otro: "Sin identificar",
+  chrome: "Chrome", edge: "Edge", firefox: "Firefox", brave: "Brave", opera: "Opera",
+  ie: "Internet Explorer", webview: "Web incrustada",
+  office: "Office", outlook: "Correo (Outlook)", teams: "Teams", whatsapp: "WhatsApp",
+  zoom: "Zoom", slack: "Slack", skype: "Skype", pdf: "PDF",
+  explorador: "Explorador de archivos", escritorio: "Escritorio de Windows", notas: "Accesorios",
+  remoto: "Escritorio remoto", java: "Aplicación Java", medios: "Fotos y vídeo", archivos: "Comprimidos",
+  uexe: "Ü (asistente)",
 };
 
 /** El color sigue a la entidad, nunca al rango: cada app conocida tiene su slot fijo. */
 export const COLOR_APP: Record<string, string> = {
-  sap: "var(--color-s1)", miracle_web: "var(--color-s2)", chrome: "var(--color-s3)", edge: "var(--color-s4)",
-  office: "var(--color-s5)", firefox: "var(--color-s6)", uexe: "var(--color-s7)", explorador: "var(--color-s8)",
-  otro: "var(--color-otro)", bloqueado: "var(--color-estado-bloqueado)",
+  sap: "var(--color-s1)", miracle_web: "var(--color-s2)", bloqueado: "var(--color-estado-bloqueado)",
+  otro: "var(--color-otro)",
+  chrome: "var(--color-s3)", edge: "var(--color-s4)", firefox: "var(--color-s6)",
+  office: "var(--color-s5)", outlook: "var(--color-s7)", teams: "var(--color-s11)",
+  explorador: "var(--color-s8)", escritorio: "var(--color-otro)", pdf: "var(--color-s10)",
+  whatsapp: "var(--color-s9)", remoto: "var(--color-s12)", uexe: "var(--color-s7)",
 };
 // Una app que llegue por config y no esté arriba recibe un slot estable por hash, nunca el
 // s1 (SAP) ni el s2 (Miracle): esos dos colores significan algo en todo el panel.
-const PALETA_LIBRE = ["var(--color-s3)", "var(--color-s4)", "var(--color-s5)", "var(--color-s6)", "var(--color-s7)", "var(--color-s8)"];
+const PALETA_LIBRE = ["var(--color-s3)", "var(--color-s4)", "var(--color-s5)", "var(--color-s6)",
+  "var(--color-s7)", "var(--color-s8)", "var(--color-s9)", "var(--color-s10)", "var(--color-s11)", "var(--color-s12)"];
 function fnv1a(s: string): number {
   let h = 0x811c9dc5;
   for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
   return h;
 }
 export function colorApp(app: string): string { return COLOR_APP[app] ?? PALETA_LIBRE[fnv1a(app) % PALETA_LIBRE.length]; }
-export function etiquetaApp(app: string): string { return ETIQUETA_APP[app] ?? app; }
+/** «acrord32» → «Acrord32». Un proceso desconocido se enseña con su propio nombre: es un dato,
+ * no un fallo, y es lo que hace falta para meterlo en el catálogo desde Configuración. */
+export function etiquetaApp(app: string): string {
+  if (ETIQUETA_APP[app]) return ETIQUETA_APP[app];
+  return app.charAt(0).toUpperCase() + app.slice(1);
+}
 
 // Los kinds de lib/vocabulario.ts, en palabras. Si se añade un kind allí, se añade aquí.
 export const ETIQUETA_EVENTO: Record<string, string> = {

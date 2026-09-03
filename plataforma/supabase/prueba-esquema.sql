@@ -124,7 +124,7 @@ do $$ declare ok boolean; j jornada_summary%rowtype; begin
   if j.primera_actividad <> timestamptz '2026-09-01 08:00:00-05' then raise exception 'primera_actividad: %', j.primera_actividad; end if;
   if j.ultima_actividad <> timestamptz '2026-09-01 08:00:00-05' + interval '6600 seconds' then raise exception 'ultima_actividad: %', j.ultima_actividad; end if;
   if j.sucia then raise exception 'el resumen recién hecho no puede estar sucio'; end if;
-  if j.algo_version <> 2 then raise exception 'algo_version: % (esperado 2)', j.algo_version; end if;
+  if j.algo_version <> 3 then raise exception 'algo_version: % (esperado 3)', j.algo_version; end if;
   -- algo_version 2: arranque, cola, percentiles, por app y por hora
   if j.pre_atencion_ms <> 0 then raise exception 'pre_atencion_ms: % (esperado 0: el primer paciente abre en la cubeta 0)', j.pre_atencion_ms; end if;
   -- cola: sap activo después de abrir al último paciente (B, cubeta 120): 162 + 54 cubetas sap × 12000
@@ -181,6 +181,43 @@ do $$ declare j jornada_summary%rowtype; begin
   if j.device_id is null then raise exception 'un día sin cubetas debía tener resumen'; end if;
   if j.calidad_ok or not ('sin_actividad' = any(j.calidad_motivos)) then raise exception 'un día sin cubetas no es comparable: %', j.calidad_motivos; end if;
   if j.activo_ms <> 0 or j.pacientes <> 0 then raise exception 'un día sin cubetas debía sumar cero'; end if;
+end $$;
+
+-- EL RELOJ DE PARED QUE SE ARRASTRA (el fallo que dejaba el estudio sin datos comparables).
+-- Un PC numera las cubetas con la hora del sistema y las llena con ticks medidos en el reloj
+-- monotónico. Cuando la hora del sistema se corrige hacia atrás en pasitos —cada uno por debajo
+-- del umbral de «salto de reloj»— todos los ticks de ese rato caen en la MISMA cubeta y la
+-- siguiente aparece minutos después. Así llegaron 3 PCs del HGM el 2026-09-03: el tiempo estaba
+-- medido (la suma de foreground_ms era EXACTAMENTE la ventana del día) pero el resumen contaba
+-- filas × 15 s, declaraba «sin datos» un tercio del día y excluía la jornada entera.
+--
+-- Aquí: 20 cubetas normales, luego UNA con 180 s de foreground y la siguiente 180 s después,
+-- y otras 20 normales. Ventana 10:00:00 → 10:13:00 = 780 000 ms, todos cubiertos.
+insert into devices (id, machine_name) values ('44444444-4444-4444-4444-444444444444', 'PC-RELOJ-LENTO') on conflict do nothing;
+insert into samples (device_id, dia_operativo, bucket_start, bucket_ms, seq, app, surface, sap_user, foreground_ms, active_ms)
+select '44444444-4444-4444-4444-444444444444', date '2026-09-01', timestamptz '2026-09-01 10:00:00-05' + g * interval '15 seconds', 15000, 0,
+  'sap', 'sapgui://PRD/NV2000/SAPMNPA10/0100', 'MED01', 15000, 12000
+from generate_series(0, 19) g;
+insert into samples (device_id, dia_operativo, bucket_start, bucket_ms, seq, app, surface, sap_user, foreground_ms, active_ms)
+values ('44444444-4444-4444-4444-444444444444', date '2026-09-01', timestamptz '2026-09-01 10:05:00-05', 15000, 0,
+  'sap', 'sapgui://PRD/NV2000/SAPMNPA10/0100', 'MED01', 180000, 0);
+insert into samples (device_id, dia_operativo, bucket_start, bucket_ms, seq, app, surface, sap_user, foreground_ms, active_ms)
+select '44444444-4444-4444-4444-444444444444', date '2026-09-01', timestamptz '2026-09-01 10:08:00-05' + g * interval '15 seconds', 15000, 0,
+  'sap', 'sapgui://PRD/NV2000/SAPMNPA10/0100', 'MED01', 15000, 12000
+from generate_series(0, 19) g;
+select upsert_jornada('44444444-4444-4444-4444-444444444444', date '2026-09-01', '44444444-0000-0000-0000-000000000001', null,
+  timestamptz '2026-09-01 10:00:00-05', timestamptz '2026-09-01 10:13:00-05', '2.0.0', 1, 0, 0, 0, false, 0, 0, true, null, 0);
+do $$ declare j jornada_summary%rowtype; begin
+  perform recompute_jornada('44444444-4444-4444-4444-444444444444', date '2026-09-01');
+  select * into j from jornada_summary where device_id = '44444444-4444-4444-4444-444444444444' and dia_operativo = date '2026-09-01';
+  -- La cubeta arrastrada cubre sus 180 s: ni un hueco, ni una jornada excluida.
+  if j.sin_datos_ms <> 0 then raise exception 'reloj lento: sin_datos_ms % (esperado 0: el tiempo está medido dentro de la fila)', j.sin_datos_ms; end if;
+  if j.cobertura_pct <> 100.0 then raise exception 'reloj lento: cobertura % (esperado 100)', j.cobertura_pct; end if;
+  if not j.calidad_ok then raise exception 'reloj lento: la jornada debía ser comparable, motivos %', j.calidad_motivos; end if;
+  -- Y esos 180 s no se cuentan como actividad: la cubeta llegó con active_ms 0.
+  if j.activo_ms <> 40 * 12000 then raise exception 'reloj lento: activo_ms % (esperado %)', j.activo_ms, 40 * 12000; end if;
+  if j.inactivo_ms <> 180000 then raise exception 'reloj lento: inactivo_ms % (esperado 180000)', j.inactivo_ms; end if;
+  if j.ventana_ms <> 780000 then raise exception 'reloj lento: ventana_ms % (esperado 780000)', j.ventana_ms; end if;
 end $$;
 
 select 'prueba-esquema: todo en orden' as resultado;

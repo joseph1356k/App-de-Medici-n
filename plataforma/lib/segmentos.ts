@@ -35,10 +35,33 @@ export type Bucket = {
 };
 
 export const CUBETA_MS = 15_000;
-/** Lo que cubre una fila. Normalmente son los 15 s de su cubeta, pero el medidor funde los tramos
- * en los que no pasa nada en UNA fila que cubre todo el tramo (una noche bloqueado son unas pocas
- * filas, no miles). Dar por hecho 15 s aquí se comería ese tiempo del dibujo y de los totales. */
+/** Lo declarado por la fila: 15 s lo normal, o el tramo entero cuando el medidor fundió cubetas
+ * en las que no pasaba nada (una noche bloqueado son unas pocas filas, no miles). */
 export const anchoDe = (b: Pick<Bucket, "bucket_ms">) => (b.bucket_ms > 0 ? b.bucket_ms : CUBETA_MS);
+
+/**
+ * LO QUE UNA CUBETA CUBRE DE VERDAD, que no siempre es lo que dice `bucket_ms`.
+ *
+ * Una cubeta se numera por el reloj de pared del PC y se llena con ticks medidos en el reloj
+ * monotónico. Cuando el reloj de pared se arrastra —pasa en los PCs del HGM: el sistema corrige la
+ * hora en pasitos hacia atrás, cada uno demasiado pequeño para contar como salto— los dos relojes
+ * dejan de coincidir un rato y todos los ticks de ese rato caen en la MISMA cubeta. El resultado
+ * es una cubeta con 180 s de `foreground_ms` dentro y ninguna cubeta hasta 180 s después.
+ *
+ * El tiempo NO se pierde: está medido, con su app y su actividad, dentro de esa fila (comprobado
+ * en producción: la suma de `foreground_ms` del día es EXACTAMENTE la ventana del día). Lo que se
+ * perdía era el dibujo y la cobertura, porque dar por hecho 15 s convertía en «sin datos» un
+ * tercio de una jornada perfectamente medida.
+ *
+ * Así que una cubeta cubre lo que midió —el foreground de todas sus partes— con dos topes: nunca
+ * menos que lo declarado, y nunca tanto como para pisar la cubeta siguiente.
+ */
+export function spanDeCubeta(partes: Pick<Bucket, "bucket_ms" | "foreground_ms">[], hastaLaSiguienteMs?: number): number {
+  const declarado = Math.max(...partes.map(anchoDe));
+  const medido = partes.reduce((s, p) => s + Math.max(0, p.foreground_ms), 0);
+  const span = Math.max(declarado, medido);
+  return hastaLaSiguienteMs != null && hastaLaSiguienteMs > 0 ? Math.min(span, hastaLaSiguienteMs) : span;
+}
 /** Un hueco mayor que esto entre dos cubetas consecutivas es «sin datos». Dos cubetas
  * seguidas distan 15 s; 30 s tolera una cubeta perdida sin abrir un agujero en el dibujo. */
 export const HUECO_MS = 30_000;
@@ -66,10 +89,10 @@ function mismaClave(s: Seg, b: Bucket, estado: Estado): boolean {
 }
 
 /**
- * Cubetas → segmentos. Cada fila cubre lo que dice su `bucket_ms` (15 s lo normal; un tramo
- * entero si el medidor lo fundió por no pasar nada). Dentro de una misma cubeta, las partes
- * (seq 0, 1, 2…) se reparten ese ancho en proporción a su foreground_ms, en orden: así el tramo
- * de cada parte es contiguo al anterior y las partes suman exactamente la cubeta.
+ * Cubetas → segmentos. Cada cubeta cubre lo que midió (`spanDeCubeta`), sin pisar a la siguiente.
+ * Dentro de una misma cubeta, las partes (seq 0, 1, 2…) se reparten ese ancho en proporción a su
+ * foreground_ms, en orden: así el tramo de cada parte es contiguo al anterior y las partes suman
+ * exactamente la cubeta.
  */
 export function segmentar(buckets: Bucket[], huecoMs = HUECO_MS): Segmento[] {
   const orden = [...buckets].sort((a, b) => ms(a.bucket_start) - ms(b.bucket_start) || a.seq - b.seq);
@@ -84,7 +107,8 @@ export function segmentar(buckets: Bucket[], huecoMs = HUECO_MS): Segmento[] {
     i = j;
 
     const total = partes.reduce((s, p) => s + Math.max(0, p.foreground_ms), 0);
-    const ancho = Math.max(...partes.map(anchoDe));
+    const siguiente = i < orden.length ? ms(orden[i].bucket_start) - T : undefined;
+    const ancho = spanDeCubeta(partes, siguiente);
     let cursor = T;
     partes.forEach((b, k) => {
       const ultima = k === partes.length - 1;

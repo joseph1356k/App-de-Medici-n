@@ -1,9 +1,9 @@
 // Los filtros del panel, leídos de la URL: una sola fila arriba de todo, y todo lo de
 // abajo se calcula contra la misma rebanada (así los números siempre concuerdan).
 // Las fechas son DÍAS OPERATIVOS (corte 06:00 Bogotá): «hoy» a las 02:00 sigue siendo ayer.
-import { hoyOperativo, sumarDias, RE_FECHA } from "./fechas";
+import { diasEntre, hoyOperativo, sumarDias, RE_FECHA } from "./fechas";
 
-export { hoyBogota, hoyOperativo, sumarDias } from "./fechas";
+export { hoyBogota, hoyOperativo, sumarDias, diasEntre } from "./fechas";
 
 export type Filtros = {
   rango: string; desde: string; hasta: string;
@@ -52,6 +52,18 @@ export function leerFiltros(sp: Sp): Filtros {
   };
 }
 
+/**
+ * EL PERIODO ANTERIOR, del mismo largo y pegado al elegido: 30 días → los 30 de antes; hoy →
+ * ayer. Es contra lo que se compara cada titular, y por eso tiene que ser una función y no un
+ * cálculo suelto en la página: si «anterior» significa una cosa en un sitio y otra en otro, las
+ * flechas de subida y bajada dejan de querer decir nada.
+ */
+export function periodoPrevio(f: Filtros): Filtros {
+  const dias = Math.max(1, diasEntre(f.desde, f.hasta));
+  const hasta = sumarDias(f.desde, -1);
+  return { ...f, rango: "custom", desde: sumarDias(hasta, -(dias - 1)), hasta };
+}
+
 /** `?fecha=YYYY-MM-DD` de la vista de un día: por defecto el día operativo de hoy, y nunca
  * uno futuro (no hay nada que ver ahí). */
 export function leerFecha(sp: Sp): string {
@@ -63,7 +75,7 @@ export function leerFecha(sp: Sp): string {
 /** Reconstruye la query string con un cambio, para los enlaces de filtro. */
 export function conFiltro(
   f: Filtros,
-  cambios: Partial<Record<"rango" | "desde" | "hasta" | "fase" | "consultorio" | "dispositivo" | "incluir_mala" | "page" | "fecha", string | null>>,
+  cambios: Partial<Record<"rango" | "desde" | "hasta" | "fase" | "consultorio" | "dispositivo" | "incluir_mala" | "page" | "fecha" | "metrica", string | null>>,
 ): string {
   const q = new URLSearchParams();
   const base: Record<string, string | null> = {
