@@ -30,8 +30,33 @@ export async function guardarHospital(formData: FormData): Promise<void> {
   volver("ok", "Nombre guardado.");
 }
 
-/** Roster: una línea por médico, «Nombre | USUARIO_SAP1, USUARIO_SAP2». No borra:
- * los que ya no estén quedan inactivos (sus turnos medidos siguen apuntando a ellos). */
+/** Los consultorios: la unidad del estudio. Crear (sin id) o cambiar nombre, orden y si sigue
+ * activo (con id). Nunca se borran: las muestras ya estampadas apuntan a ellos. */
+export async function guardarConsultorio(formData: FormData): Promise<void> {
+  const id = `${formData.get("id") ?? ""}`.trim();
+  const nombre = `${formData.get("nombre") ?? ""}`.trim().slice(0, 60);
+  const orden = Number(formData.get("orden") ?? 0);
+  const activo = `${formData.get("activo") ?? "1"}` !== "0";
+  if (!nombre) volver("error", "El consultorio necesita un nombre.");
+  if (id && !/^[0-9a-f-]{36}$/i.test(id)) volver("error", "Petición inválida.");
+  try {
+    if (id) {
+      await sql`update consultorios set nombre = ${nombre}, orden = ${Number.isFinite(orden) ? orden : 0}, activo = ${activo} where id = ${id}::uuid`;
+    } else {
+      await sql`insert into consultorios (nombre, orden, activo)
+        values (${nombre}, coalesce(nullif(${Number.isFinite(orden) ? orden : 0}, 0), (select coalesce(max(orden), 0) + 1 from consultorios)), ${activo})`;
+    }
+  } catch (e) {
+    if (`${(e as Error).message}`.includes("consultorios_nombre_key")) volver("error", `Ya hay un consultorio llamado «${nombre}».`);
+    throw e;
+  }
+  revalidatePath("/", "layout");
+  volver("ok", id ? `Consultorio «${nombre}» guardado.` : `Consultorio «${nombre}» creado. Asígnale su PC en Dispositivos.`);
+}
+
+/** Roster: una línea por persona, «Nombre | USUARIO_SAP1, USUARIO_SAP2». Es una anotación:
+ * pone nombre al usuario SAP visto en una jornada; lo ya medido no cambia. No borra: los
+ * que ya no estén quedan inactivos. */
 export async function guardarRoster(formData: FormData): Promise<void> {
   const lineas = `${formData.get("roster") ?? ""}`.split("\n").map((l) => l.trim()).filter(Boolean);
   const medicos = lineas.map((l, i) => {
@@ -54,7 +79,7 @@ export async function guardarRoster(formData: FormData): Promise<void> {
   });
   await avisarALosPcs();
   revalidatePath(BASE);
-  volver("ok", `Lista guardada: ${medicos.length} médicos. Los PCs la reciben en su próximo latido (un minuto).`);
+  volver("ok", `Lista guardada: ${medicos.length} nombres. Es una anotación opcional: los datos ya medidos no cambian.`);
 }
 
 export async function fijarFase(formData: FormData): Promise<void> {
@@ -67,7 +92,7 @@ export async function fijarFase(formData: FormData): Promise<void> {
   await sql`select relabel_phases()`;
   await avisarALosPcs();
   revalidatePath("/", "layout");
-  volver("ok", `Fase «${phase}» fijada desde ${starts}. Los turnos se re-etiquetaron según el calendario.`);
+  volver("ok", `Fase «${phase}» fijada desde ${starts}. Las jornadas se re-etiquetaron según el calendario.`);
 }
 
 export async function borrarFase(formData: FormData): Promise<void> {
@@ -77,7 +102,7 @@ export async function borrarFase(formData: FormData): Promise<void> {
   await sql`select relabel_phases()`;
   await avisarALosPcs();
   revalidatePath("/", "layout");
-  volver("ok", "Fase borrada y turnos re-etiquetados.");
+  volver("ok", "Fase borrada y jornadas re-etiquetadas.");
 }
 
 /** La config que obedece el .exe. Se valida la forma y se sube la versión: cada PC la

@@ -2,60 +2,67 @@
 // un rango grande no se carga entero en memoria ni choca con el límite de tamaño de
 // respuesta del hosting. Tres formatos: CSV (Excel), JSON (array) y NDJSON (una línea
 // por fila, para procesar por lotes). El dataset JSON lleva el diccionario dentro.
+//
+// Todo va por CONSULTORIO y JORNADA (consultorio × día operativo). El médico aparece como
+// anotación derivada del login SAP (medico_id / medico), nunca como clave.
 import { sql } from "./db";
 import { DICCIONARIO } from "./diccionario";
 import type { Filtros } from "./filtros";
-import { filtroTurnos } from "./consultas";
+import { filtroJornadas } from "./consultas";
 
 type Fila = Record<string, unknown>;
 
 export const COLUMNAS = {
-  turnos: ["shift_id", "fecha_operativa", "phase", "doctor_id", "medico", "device_id", "pc", "pc_etiqueta", "started_at", "ended_at", "end_reason",
-    "duracion_ms", "foreground_ms_total", "active_ms_total", "his_ms", "miracle_ms", "typing_ms", "keystrokes", "clicks", "scroll_ticks", "context_switches",
-    "encounters", "encounter_active_ms_mediana", "post_atencion_ms", "cola_post_turno_ms", "sap_wait_ms_total", "sap_roundtrips", "ready_ms_p50", "ready_ms_p95",
-    "pantallas_distintas", "visitas", "tabs", "enters", "correcciones", "copias", "pegados", "guardados",
-    "interrupciones", "revisitas_sap", "consultas_por_hora", "consulta_ms_mediana", "entre_consultas_ms_mediana", "carga_admin_pct",
-    "cobertura_pct", "calidad_ok", "active_ms_por_app", "sap_user_seen", "app_version", "huecos_ms", "clock_jumps",
-    "spool_dropped", "hooks_degradados", "ticks_sap_saltados_busy", "algo_version"],
-  muestras: ["shift_id", "device_id", "doctor_id", "phase", "bucket_start", "bucket_ms", "seq", "app", "surface", "encounter_key", "foreground_ms", "active_ms",
-    "typing_ms", "keystrokes", "clicks", "scroll_ticks", "context_switches", "sap_roundtrips", "sap_wait_ms",
+  jornadas: ["device_id", "pc", "consultorio_id", "consultorio", "dia_operativo", "phase", "primera_actividad", "ultima_actividad", "ventana_ms",
+    "foreground_ms", "activo_ms", "his_ms", "miracle_ms", "typing_ms", "keystrokes", "clicks", "scroll_ticks", "context_switches",
+    "tabs", "enters", "correcciones", "copias", "pegados", "guardados",
+    "pacientes", "consulta_ms_mediana", "activo_por_paciente_mediana", "entre_consultas_ms_mediana", "post_atencion_ms", "interrupciones", "pacientes_por_hora",
+    "visitas", "pantallas_distintas", "revisitas_sap", "sap_wait_ms", "sap_roundtrips", "ready_ms_p50", "ready_ms_p95",
+    "bloqueado_ms", "inactivo_ms", "sin_datos_ms", "cobertura_pct", "carga_admin_pct", "tramos", "tramos_ms", "procesos", "app_version",
+    "activo_por_app", "sap_users", "calidad", "calidad_ok", "calidad_motivos", "algo_version", "resumido_en"],
+  muestras: ["device_id", "consultorio_id", "dia_operativo", "phase", "bucket_start", "bucket_ms", "seq", "app", "surface", "encounter_key", "sap_user", "medico_id", "medico",
+    "foreground_ms", "active_ms", "typing_ms", "keystrokes", "clicks", "scroll_ticks", "context_switches", "sap_roundtrips", "sap_wait_ms",
     "tabs", "enters", "correcciones", "copias", "pegados", "guardados"],
-  visitas: ["shift_id", "device_id", "doctor_id", "phase", "encounter_key", "sid", "tcode", "dynpro", "surface", "entered_at", "left_at", "dwell_ms", "ready_ms",
-    "sap_wait_ms", "roundtrips", "exit_to"],
-  eventos: ["shift_id", "device_id", "occurred_at", "kind", "encounter_key", "detail"],
+  visitas: ["device_id", "consultorio_id", "dia_operativo", "phase", "encounter_key", "sap_user", "medico_id", "sid", "tcode", "dynpro", "surface",
+    "entered_at", "left_at", "dwell_ms", "ready_ms", "sap_wait_ms", "roundtrips", "exit_to"],
+  eventos: ["device_id", "consultorio_id", "dia_operativo", "occurred_at", "kind", "encounter_key", "detail"],
 } as const;
 
 export type Coleccion = keyof typeof COLUMNAS;
 
-const turnosFiltrados = (f: Filtros) => sql`select m.shift_id from shift_summary m where ${filtroTurnos(f)}`;
+const jornadasFiltradas = (f: Filtros) => sql`select j.device_id, j.dia_operativo from jornada_summary j where ${filtroJornadas(f)}`;
 
 export function consulta(col: Coleccion, f: Filtros) {
   switch (col) {
-    case "turnos":
-      return sql`select m.shift_id, m.fecha_operativa::text as fecha_operativa, m.phase, m.doctor_id, r.display_name as medico, m.device_id, d.machine_name as pc, d.label as pc_etiqueta,
-        m.started_at, m.ended_at, s.end_reason, m.duracion_ms, m.foreground_ms_total, m.active_ms_total, m.his_ms, m.miracle_ms, m.typing_ms, m.keystrokes, m.clicks,
-        m.scroll_ticks, m.context_switches, m.encounters, m.encounter_active_ms_mediana, m.post_atencion_ms, m.cola_post_turno_ms, m.sap_wait_ms_total, m.sap_roundtrips,
-        m.ready_ms_p50, m.ready_ms_p95, m.pantallas_distintas, m.visitas,
-        m.tabs, m.enters, m.correcciones, m.copias, m.pegados, m.guardados,
-        m.interrupciones, m.revisitas_sap, m.consultas_por_hora, m.consulta_ms_mediana, m.entre_consultas_ms_mediana, m.carga_admin_pct,
-        m.cobertura_pct, m.calidad_ok, m.active_ms_por_app, s.sap_user_seen, s.app_version,
-        s.huecos_ms, s.clock_jumps, s.spool_dropped, s.hooks_degradados, s.ticks_sap_saltados_busy, m.algo_version
-        from shift_summary m join shifts s on s.shift_id = m.shift_id left join roster r on r.id = m.doctor_id left join devices d on d.id = m.device_id
-        where ${filtroTurnos(f)} order by m.started_at`;
+    case "jornadas":
+      return sql`select j.device_id, d.machine_name as pc, j.consultorio_id, c.nombre as consultorio, j.dia_operativo::text as dia_operativo, j.phase,
+        j.primera_actividad, j.ultima_actividad, j.ventana_ms,
+        j.foreground_ms, j.activo_ms, j.his_ms, j.miracle_ms, j.typing_ms, j.keystrokes, j.clicks, j.scroll_ticks, j.context_switches,
+        j.tabs, j.enters, j.correcciones, j.copias, j.pegados, j.guardados,
+        j.pacientes, j.consulta_ms_mediana, j.activo_por_paciente_mediana, j.entre_consultas_ms_mediana, j.post_atencion_ms, j.interrupciones, j.pacientes_por_hora,
+        j.visitas, j.pantallas_distintas, j.revisitas_sap, j.sap_wait_ms, j.sap_roundtrips, j.ready_ms_p50, j.ready_ms_p95,
+        j.bloqueado_ms, j.inactivo_ms, j.sin_datos_ms, j.cobertura_pct, j.carga_admin_pct, j.tramos, j.tramos_ms, j.procesos, j.app_version,
+        j.activo_por_app, j.sap_users, j.calidad, j.calidad_ok, j.calidad_motivos, j.algo_version, j.resumido_en
+        from jornada_summary j left join consultorios c on c.id = j.consultorio_id left join devices d on d.id = j.device_id
+        where ${filtroJornadas(f)} order by j.dia_operativo, c.orden, d.machine_name`;
     case "muestras":
-      return sql`select x.shift_id, x.device_id, s.doctor_id, s.phase, x.bucket_start, x.bucket_ms, x.seq, x.app, x.surface, x.encounter_key, x.foreground_ms, x.active_ms,
-        x.typing_ms, x.keystrokes, x.clicks, x.scroll_ticks, x.context_switches, x.sap_roundtrips, x.sap_wait_ms,
+      return sql`select x.device_id, x.consultorio_id, x.dia_operativo::text as dia_operativo, j.phase, x.bucket_start, x.bucket_ms, x.seq, x.app, x.surface, x.encounter_key,
+        x.sap_user, medico_de(x.sap_user) as medico_id, r.display_name as medico,
+        x.foreground_ms, x.active_ms, x.typing_ms, x.keystrokes, x.clicks, x.scroll_ticks, x.context_switches, x.sap_roundtrips, x.sap_wait_ms,
         x.tabs, x.enters, x.correcciones, x.copias, x.pegados, x.guardados
-        from samples x join shifts s on s.shift_id = x.shift_id
-        where x.shift_id in (${turnosFiltrados(f)}) order by x.bucket_start, x.seq`;
+        from samples x
+        left join jornada_summary j on j.device_id = x.device_id and j.dia_operativo = x.dia_operativo
+        left join roster r on r.id = medico_de(x.sap_user)
+        where (x.device_id, x.dia_operativo) in (${jornadasFiltradas(f)}) order by x.bucket_start, x.seq`;
     case "visitas":
-      return sql`select v.shift_id, v.device_id, s.doctor_id, s.phase, v.encounter_key, v.sid, v.tcode, v.dynpro, v.surface, v.entered_at, v.left_at, v.dwell_ms, v.ready_ms,
-        v.sap_wait_ms, v.roundtrips, v.exit_to
-        from sap_visits v join shifts s on s.shift_id = v.shift_id
-        where v.shift_id in (${turnosFiltrados(f)}) order by v.entered_at`;
+      return sql`select v.device_id, v.consultorio_id, v.dia_operativo::text as dia_operativo, j.phase, v.encounter_key, v.sap_user, medico_de(v.sap_user) as medico_id,
+        v.sid, v.tcode, v.dynpro, v.surface, v.entered_at, v.left_at, v.dwell_ms, v.ready_ms, v.sap_wait_ms, v.roundtrips, v.exit_to
+        from sap_visits v
+        left join jornada_summary j on j.device_id = v.device_id and j.dia_operativo = v.dia_operativo
+        where (v.device_id, v.dia_operativo) in (${jornadasFiltradas(f)}) order by v.entered_at`;
     case "eventos":
-      return sql`select e.shift_id, e.device_id, e.occurred_at, e.kind, e.encounter_key, e.detail
-        from events e where e.shift_id in (${turnosFiltrados(f)}) order by e.occurred_at`;
+      return sql`select e.device_id, e.consultorio_id, e.dia_operativo::text as dia_operativo, e.occurred_at, e.kind, e.encounter_key, e.detail
+        from events e where (e.device_id, e.dia_operativo) in (${jornadasFiltradas(f)}) order by e.occurred_at`;
   }
 }
 
@@ -102,21 +109,26 @@ async function* arrayJson(col: Coleccion, f: Filtros, tope: number): AsyncGenera
   yield "\n  ]";
 }
 
-/** El dataset autodescriptivo: diccionario + catálogos + turnos + visitas + eventos (+ muestras). */
+/** El dataset autodescriptivo: diccionario + catálogos + jornadas + visitas + eventos (+ muestras). */
 export async function* dataset(f: Filtros, conMuestras: boolean): AsyncGenerator<string> {
-  const [fases, medicos, dispositivos] = await Promise.all([
+  const [fases, consultorios, medicos, dispositivos] = await Promise.all([
     sql`select phase, starts_on::text as starts_on, ends_on::text as ends_on, notes from study_phases order by starts_on`,
+    sql`select id, nombre, orden, activo from consultorios order by orden, nombre`,
     sql`select id, display_name, sap_users, active from roster order by sort_order, display_name`,
-    sql`select id, machine_name, label, status, app_version, registered_at, last_seen_at from devices order by machine_name`,
+    sql`select d.id, d.machine_name, d.consultorio_id, c.nombre as consultorio, d.status, d.app_version, d.registered_at, d.last_seen_at
+        from devices d left join consultorios c on c.id = d.consultorio_id order by c.orden, d.machine_name`,
   ]);
   const cabecera = {
-    _leeme: { ...DICCIONARIO, generado_en: new Date().toISOString(), rango: { desde: f.desde, hasta: f.hasta, fase: f.fase, doctor_id: f.medico, device_id: f.dispositivo, incluye_mala_calidad: f.incluirMala },
-      topes: "visitas_sap y eventos se cortan en 200000 filas; muestras (si se pidieron) en 500000. Para más, usa las exportaciones por colección en NDJSON o acota el rango." },
-    fases, medicos, dispositivos,
+    _leeme: {
+      ...DICCIONARIO, generado_en: new Date().toISOString(),
+      rango: { desde: f.desde, hasta: f.hasta, fase: f.fase, consultorio_id: f.consultorio, device_id: f.dispositivo, incluye_mala_calidad: f.incluirMala },
+      topes: "visitas_sap y eventos se cortan en 200000 filas; muestras (si se pidieron) en 500000. Para más, usa las exportaciones por colección en NDJSON o acota el rango.",
+    },
+    fases, consultorios, medicos, dispositivos,
   };
   const texto = JSON.stringify(cabecera, null, 2);
-  yield texto.slice(0, -2) + ",\n  \"turnos\": ";
-  yield* arrayJson("turnos", f, 1_000_000);
+  yield texto.slice(0, -2) + ",\n  \"jornadas\": ";
+  yield* arrayJson("jornadas", f, 1_000_000);
   yield ",\n  \"visitas_sap\": ";
   yield* arrayJson("visitas", f, 200_000);
   yield ",\n  \"eventos\": ";

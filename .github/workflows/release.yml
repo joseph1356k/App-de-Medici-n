@@ -65,7 +65,7 @@ jobs:
             --title "Medidor $TAG" \
             --notes "**Descarga \`Medidor.exe\`, haz doble clic, y ya.** Se instala solo, arranca con Windows y empieza a medir.
 
-          No necesita permisos de administrador ni tener .NET instalado. Aparece un círculo junto al reloj de Windows: ámbar = falta elegir el médico, verde = midiendo.
+          No necesita permisos de administrador ni tener .NET instalado. Se vigila a sí mismo: si se cierra vuelve solo en menos de 5 minutos. Aparece un círculo junto al reloj de Windows: ámbar = falta asignarle el consultorio en el panel (Dispositivos), verde = midiendo en su consultorio.
 
           Para quitarlo, \`desinstalar.ps1\`. Para apuntar a otro servidor, \`instalar.ps1 -Servidor ... -Clave ...\`.
 

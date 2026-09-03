@@ -33,8 +33,8 @@ describe.skipIf(!corre)("el cliente con reloj contra Postgres de verdad", () => 
 
   it("sql.json pasa intacto por el Proxy", async () => {
     const [d] = await sql<{ id: string }[]>`insert into devices (machine_name) values ('prueba-reloj') returning id`;
-    await sql`insert into events (event_uid, device_id, shift_id, kind, occurred_at, detail)
-      values ('prueba-reloj', ${d.id}::uuid, null, 'calidad', now(), ${sql.json({ a: 1 } as never)})
+    await sql`insert into events (event_uid, device_id, dia_operativo, kind, occurred_at, detail)
+      values ('prueba-reloj', ${d.id}::uuid, dia_operativo_de(now()), 'calidad', now(), ${sql.json({ a: 1 } as never)})
       on conflict (event_uid) do update set detail = excluded.detail`;
     const [ev] = await sql<{ detail: { a: number } }[]>`select detail from events where event_uid = 'prueba-reloj'`;
     expect(ev.detail.a).toBe(1);

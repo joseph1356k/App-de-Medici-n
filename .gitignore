@@ -2,7 +2,15 @@
 bin/
 obj/
 out/
+salida/
 *.user
+# Lo que el medidor deja en un PC (jamás en el repo)
+*.db
+*.db-wal
+*.db-shm
+medidor.json
+secreto.bin
+vigilante.xml
 # Node
 node_modules/
 .next/

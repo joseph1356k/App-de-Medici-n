@@ -1,8 +1,8 @@
 {
   "name": "medicion-plataforma",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
-  "description": "Plataforma web del Medidor: recibe los datos del .exe, los guarda en Postgres y los muestra en un panel claro con exportación lista para IA.",
+  "description": "Plataforma web del Medidor v2: recibe los datos continuos de cada consultorio, los guarda en Postgres y los muestra en un panel por consultorio con línea de tiempo y exportación lista para IA.",
   "scripts": {
     "dev": "next dev -p 3000",
     "build": "next build",

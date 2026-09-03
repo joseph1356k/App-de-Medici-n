@@ -7,7 +7,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  # El contrato del instrumento: 22 promesas, sin pantalla, en Linux, en menos de un segundo.
+  # El contrato del instrumento: 31 promesas, sin pantalla, en Linux, en menos de un segundo.
+  # Y la App se compila aquí mismo: antes el primer compilado de App era el publish.
   contrato:
     runs-on: ubuntu-latest
     steps:
@@ -15,6 +16,7 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with: { dotnet-version: "8.0.x" }
       - run: dotnet run -c Release --project medidor/Contrato
+      - run: dotnet build -c Release medidor/App/App.csproj
 
   # El .exe, publicado desde Linux (sin WPF no hace falta Windows para construirlo).
   # Queda como artefacto descargable en cada corrida.
@@ -50,7 +52,8 @@ jobs:
         env:
           MEDIDOR_API_KEY: build
 
-  # El esquema SQL, aplicado dos veces sobre un Postgres limpio (idempotencia).
+  # El esquema SQL, aplicado dos veces sobre un Postgres limpio (idempotencia), y la prueba con
+  # aserciones: si un número del resumen no cuadra, el job falla.
   esquema:
     runs-on: ubuntu-latest
     services:
@@ -65,6 +68,10 @@ jobs:
           psql -v ON_ERROR_STOP=1 postgres://postgres:postgres@localhost:5432/postgres -f plataforma/supabase/schema.sql
           psql -v ON_ERROR_STOP=1 postgres://postgres:postgres@localhost:5432/postgres -f plataforma/supabase/schema.sql
           psql -v ON_ERROR_STOP=1 postgres://postgres:postgres@localhost:5432/postgres -f plataforma/supabase/prueba-esquema.sql
+      # La semilla de desarrollo también tiene que aplicar limpia (es lo que se usa para mirar el panel en local).
+      - run: |
+          psql -v ON_ERROR_STOP=1 postgres://postgres:postgres@localhost:5432/postgres -f plataforma/supabase/semilla-dev.sql
+          psql -v ON_ERROR_STOP=1 postgres://postgres:postgres@localhost:5432/postgres -c "select count(*) as jornadas, count(*) filter (where calidad_ok) as buenas from jornada_summary"
 
       # Y con la base ya en pie, la prueba de terreno del cliente: que una consulta colgada
       # suelte su conexión (lo que tumbó el panel el 2026-09-02) y que el Proxy del reloj no

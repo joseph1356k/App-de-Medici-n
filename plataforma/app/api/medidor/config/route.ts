@@ -1,5 +1,5 @@
 // GET /api/medidor/config?device_id&config_version&hmac_version — refresco. Devuelve
-// {unchanged:true} si el .exe ya tiene lo último; si no, config + roster + fases (y el
+// {unchanged:true} si el .exe ya tiene lo último; si no, config + consultorio + roster + fases (y el
 // secreto nuevo solo si rotó). Refresca last_seen_at.
 import { sql } from "@/lib/db";
 import { exigirClave, json } from "@/lib/api";
@@ -26,7 +26,7 @@ export async function GET(req: Request) {
   const [a] = await sql<{ config_version: number; hmac_version: number }[]>`select config_version, hmac_version from settings where id = 1`;
   if (a.config_version === cv && a.hmac_version === hv) return json({ unchanged: true });
 
-  const paquete = await paqueteParaElMedidor(a.hmac_version !== hv);
+  const paquete = await paqueteParaElMedidor(a.hmac_version !== hv, deviceId);
   await sql`update devices set config_version = ${a.config_version}, hmac_version = ${a.hmac_version} where id = ${deviceId}`;
   return json({ ok: true, device_id: deviceId, ...paquete });
 }

@@ -1,5 +1,5 @@
 // POST /api/medidor/registro — el .exe se presenta al arrancar. Devuelve su identidad
-// (device_id), el secreto HMAC, la config, el roster y las fases. Sin códigos de
+// (device_id), el secreto HMAC, la config, el consultorio asignado, el roster y las fases. Sin códigos de
 // enrolamiento: la clave de la API ya autentica la instalación; el device se reconoce
 // por el device_id que guardó, o si no, por el nombre de la máquina (reinstalar en el
 // mismo PC no crea un dispositivo nuevo).
@@ -46,6 +46,6 @@ export async function POST(req: Request) {
   }
   if (device.status !== "active") return json({ error: "Dispositivo pausado o retirado.", status: device.status }, 403);
 
-  const paquete = await paqueteParaElMedidor(true);
+  const paquete = await paqueteParaElMedidor(true, device.id);
   return json({ ok: true, device_id: device.id, ...paquete });
 }
