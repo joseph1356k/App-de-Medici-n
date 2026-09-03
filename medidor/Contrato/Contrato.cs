@@ -59,6 +59,7 @@ internal static class Contrato
         Prueba("30. la clave de la huella se deriva por tick del día operativo: a las 05:59 y 06:01 la misma persona da huellas distintas, sin turno", LaClaveSeDerivaPorTick);
         Prueba("31. la jornada lleva proceso_id: dos fotos del mismo día desde procesos distintos se distinguen", LaJornadaLlevaProcesoId);
         Prueba("32. un 403 de «no te conozco» vuelve a registrar; uno de pausa deliberada, no", LosDos403SeDistinguen);
+        Prueba("33. si SAP no deja engancharse, el aviso al médico se espacia en vez de repetirse", ElEngancheNoAtosiga);
 
         Console.WriteLine();
         Console.WriteLine(_fallos == 0
@@ -903,6 +904,28 @@ internal static class Contrato
     /// que distinguirlas: si no conoce el equipo (la base se recreó) hay que volver a registrarse;
     /// si lo pausaron a propósito desde el panel, registrarse otra vez sería desobedecer.
     /// </summary>
+    /// <summary>
+    /// PROMESA 33. Engancharse al scripting saca un cuadro modal en la pantalla del médico. Si el
+    /// enganche no entra, el medidor NO puede volver a pedirlo cada pocos segundos: mediría el
+    /// trabajo estorbándolo. La espera crece y se reinicia solo cuando por fin engancha.
+    /// </summary>
+    private static void ElEngancheNoAtosiga()
+    {
+        Debe(RitmoDeEnganche.EsperaTrasRechazoS(0) >= 60, "tras la primera negativa se espera al menos un minuto");
+        var escalera = new[] { 0, 1, 2, 3, 4, 10 }.Select(RitmoDeEnganche.EsperaTrasRechazoS).ToArray();
+        Debe(escalera.Zip(escalera.Skip(1)).All(p => p.Second >= p.First), "y la espera nunca se acorta al insistir");
+        Debe(RitmoDeEnganche.EsperaTrasRechazoS(3) >= 1800 && RitmoDeEnganche.EsperaTrasRechazoS(99) == RitmoDeEnganche.EsperaTrasRechazoS(3),
+            "llega a media hora y ahí se queda: no crece sin fin ni se rinde para siempre");
+
+        // Lo que de verdad se prometió, contado en lo que ve una persona.
+        Debe(RitmoDeEnganche.AvisosComoMuchoEn(60) <= 8, "como mucho ocho avisos en la primera hora de negativas");
+        Debe(RitmoDeEnganche.AvisosComoMuchoEn(480) <= 20, "y unos pocos en una jornada entera, no cientos");
+
+        // Que SAP no esté abierto no es una negativa: nadie vio un cuadro y reintentar es barato.
+        Debe(RitmoDeEnganche.SinSapS <= 15, "sin SAP abierto se reintenta pronto, que eso no molesta a nadie");
+        Debe(RitmoDeEnganche.TrasPerderElMotorS >= 30, "y perder el motor tampoco se reengancha al instante");
+    }
+
     private static void LosDos403SeDistinguen()
     {
         // Lo que responde el servidor cuando el device_id ya no existe (app/api/medidor/lote).

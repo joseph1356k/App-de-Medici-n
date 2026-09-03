@@ -80,6 +80,19 @@ public sealed class ConfigDeMedicion
     [JsonPropertyName("sap_identity_ms")] public int SapIdentityMs { get; set; } = 1500;
     [JsonPropertyName("solo_foreground")] public bool SoloForeground { get; set; }
 
+    /// <summary>
+    /// LAS CLASES DE VENTANA QUE SON UNA SESIÓN SAP ABIERTA. Engancharse al scripting hace que SAP
+    /// muestre «Un script está intentando acceder a SAP GUI», así que solo se hace cuando delante
+    /// hay una sesión de verdad — nunca sobre el lanzador de SAP Logon, donde además no hay nada
+    /// que medir. Lista vacía = engancharse con cualquier ventana SAP delante (la escapatoria si
+    /// una versión de SAP GUI usa otra clase: se cambia desde el panel, sin recompilar).
+    /// </summary>
+    [JsonPropertyName("sap_clases_de_sesion")] public List<string> SapClasesDeSesion { get; set; } = new() { "SAP_FRONTEND_SESSION" };
+
+    /// <summary>¿Esta ventana es una sesión SAP en la que vale la pena engancharse?</summary>
+    public bool EsVentanaDeSesionSap(string clase) =>
+        SapClasesDeSesion.Count == 0 || SapClasesDeSesion.Any(c => string.Equals(c, clase, StringComparison.OrdinalIgnoreCase));
+
     /// <summary>Lo que se usa si el servidor todavía no mandó nada: SAP y los navegadores
     /// habituales. Sin esto, un PC recién instalado y sin red mediría todo como «otro».</summary>
     public static ConfigDeMedicion PorDefecto() => new()

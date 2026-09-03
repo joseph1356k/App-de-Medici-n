@@ -198,7 +198,7 @@ public sealed class Programa
         _sonda = new SondaPrimerPlano();
         _ganchos = new Ganchos();
         _ganchos.Enganchar();
-        _sap = new HiloSap(p => _config.EsProcesoSap(p), () => _config.SapIdentityMs);
+        _sap = new HiloSap(p => _config.EsProcesoSap(p), () => _config.SapIdentityMs, c => _config.EsVentanaDeSesionSap(c));
         _sap.Arrancar();
 
         _cubetas = new Cubetas();

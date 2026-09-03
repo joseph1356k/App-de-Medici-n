@@ -59,6 +59,15 @@ internal static class Win32
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassNameW(IntPtr hwnd, System.Text.StringBuilder texto, int max);
+
+    /// <summary>La clase de una ventana (p. ej. «SAP_FRONTEND_SESSION»). Es un dato TÉCNICO de la
+    /// ventana, no su título: no lleva contenido y por eso sí se puede mirar y anotar.</summary>
+    public static string ClaseDeVentana(IntPtr hwnd)
+    {
+        var sb = new System.Text.StringBuilder(256);
+        return GetClassNameW(hwnd, sb, sb.Capacity) > 0 ? sb.ToString() : "";
+    }
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowTextW(IntPtr hwnd, System.Text.StringBuilder text, int max);
     public const uint GA_ROOT = 2;
 

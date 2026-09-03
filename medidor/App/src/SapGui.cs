@@ -59,10 +59,10 @@ public sealed class SapGui
     /// <summary>Mira la sesión SAP cuya ventana es <paramref name="hwndRaiz"/> (la de primer plano).
     /// Si ninguna sesión está delante, devuelve <see cref="VistaSap.Nada"/>. Si la que está delante
     /// está ocupada, devuelve EstabaOcupado=true sin tocarla.</summary>
-    public VistaSap Mirar(IntPtr hwndRaiz)
+    public VistaSap Mirar(IntPtr hwndRaiz, bool puedeEngancharse = true)
     {
         dynamic? app;
-        try { app = Motor(); }
+        try { app = Motor(puedeEngancharse); }
         catch (Exception e) { Soltar("motor", e); return VistaSap.Nada; }
         if (app == null) return VistaSap.Nada;
 
@@ -181,11 +181,27 @@ public sealed class SapGui
     private static string Limpio(string s)
         => new(s.Where(c => char.IsAsciiLetterOrDigit(c) || c is '_' or ':' or '.' or '-').ToArray());
 
-    private object? Motor()
+    /// <summary>
+    /// El motor de scripting, enganchado UNA vez y cacheado. Hay dos formas de no conseguirlo y no
+    /// cuestan lo mismo:
+    ///   · SAP GUI no está corriendo (no hay entrada en la ROT). No se le muestra nada a nadie:
+    ///     se reintenta pronto y sin ruido.
+    ///   · SAP GUI está, pero el enganche no entra. Eso significa que SAP SACÓ EL AVISO «un script
+    ///     está intentando acceder a SAP GUI» y el médico dijo que no, o que el scripting está
+    ///     apagado. Reintentar a los pocos segundos le pone el mismo cuadro delante una y otra vez
+    ///     mientras trabaja, así que la espera crece: 1 min, 5, 15, 30. Lo pedido es medir el
+    ///     trabajo, no interrumpirlo.
+    /// </summary>
+    private int _rechazos;
+
+    private object? Motor(bool puedeEngancharse = true)
     {
         if (_motor != null) return _motor;
+        // Sin una sesión SAP delante no se engancha: el aviso saldría para nada.
+        if (!puedeEngancharse) return null;
         if (DateTime.UtcNow < _proximoIntento) return null;
 
+        bool habiaSap = false;
         foreach (var progId in ProgIds)
         {
             var tipo = Type.GetTypeFromProgID(progId);
@@ -193,12 +209,37 @@ public sealed class SapGui
             var wrapper = Activator.CreateInstance(tipo);
             var rot = tipo.InvokeMember("GetROTEntry", BindingFlags.InvokeMethod, null, wrapper, new object[] { "SAPGUI" });
             if (rot == null) break;
+            habiaSap = true;
+            // AQUÍ es donde SAP muestra el aviso al médico, si lo tiene activado.
             _motor = rot.GetType().InvokeMember("GetScriptingEngine", BindingFlags.InvokeMethod, null, rot, null);
-            if (_motor != null) { Registro.Anota("sap", "enganchado al motor de scripting"); return _motor; }
+            if (_motor != null)
+            {
+                if (_rechazos > 0) Registro.Anota("sap", $"enganchado al motor de scripting tras {_rechazos} negativa(s)");
+                else Registro.Anota("sap", "enganchado al motor de scripting");
+                _rechazos = 0;
+                return _motor;
+            }
         }
-        // Sin SAP GUI abierto (o sin scripting): no insistir cada tick, que cada intento cuesta.
-        _proximoIntento = DateTime.UtcNow.AddSeconds(15);
+
+        if (!habiaSap)
+        {
+            _proximoIntento = DateTime.UtcNow.AddSeconds(RitmoDeEnganche.SinSapS); // SAP no está abierto: nadie vio nada
+            return null;
+        }
+        Rechazado("el motor no devolvió nada");
         return null;
+    }
+
+    /// <summary>SAP está, pero no deja engancharse: se espera cada vez más antes de volver a
+    /// pedirlo, para no llenar la pantalla del médico de avisos.</summary>
+    private void Rechazado(string motivo)
+    {
+        var espera = RitmoDeEnganche.EsperaTrasRechazoS(_rechazos);
+        _rechazos++;
+        _proximoIntento = DateTime.UtcNow.AddSeconds(espera);
+        Registro.Anota("sap", $"no se pudo enganchar ({motivo}); siguiente intento en {espera} s. "
+            + "Si el médico ve «un script está intentando acceder a SAP GUI», quita el aviso en "
+            + "Opciones de SAP GUI → Accesibilidad y scripting.");
     }
 
     /// <summary>Engancha StartRequest/EndRequest en la sesión que está delante (una vez por sesión).
@@ -244,7 +285,8 @@ public sealed class SapGui
         _idSesionConEventos = "";
         _motor = null;
         _ultimaSesion = null;
-        _proximoIntento = DateTime.UtcNow.AddSeconds(5);
+        // 30 s, no 5: si SAP se cerró, reenganchar en cuanto vuelva saca OTRO aviso al médico.
+        _proximoIntento = DateTime.UtcNow.AddSeconds(RitmoDeEnganche.TrasPerderElMotorS);
     }
 
     private static string Relativo(string selector)

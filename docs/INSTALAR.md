@@ -123,12 +123,52 @@ durante el estudio; para detenerlo se pausa o retira el PC desde el panel, o se 
 El medidor lee la identidad de la pantalla por **SAP GUI Scripting**. Hace falta:
 
 1. En el servidor SAP: parámetro `sapgui/user_scripting = TRUE` (lo pone Basis, transacción RZ11).
-2. En el SAP GUI del PC: *Opciones → Accessibility & Scripting → Scripting* → habilitado; conviene desmarcar
-   «Notificar cuando un script se conecte» para que no salga el aviso a cada rato.
+2. En el SAP GUI del PC: *Opciones → Accesibilidad y scripting → Scripting* → habilitado.
+3. Y en esa misma pantalla, **quitar el aviso** (ver abajo): si no, SAP le saca un cuadro al médico
+   cada vez que el medidor se engancha.
 
 **Sin esto el medidor sigue midiendo** el tiempo en SAP como aplicación, clics y tecleo, pero no las
 pantallas, ni las esperas, ni los pacientes. El panel lo dice como alerta («SAP GUI Scripting no
 disponible») y la jornada lo lleva en su calidad (`sap_scripting = false`).
+
+### El aviso «Un script está intentando acceder a SAP GUI»
+
+Lo saca SAP GUI, no el medidor, cada vez que un programa se engancha al scripting. Es un cuadro
+**modal**: hasta que el médico no lo cierre no puede seguir trabajando. Quitarlo es una casilla en
+las opciones del SAP GUI de cada PC, y es la única forma de que no vuelva a salir:
+
+**SAP Logon → botón de opciones (la esquina superior izquierda) → *Opciones…* → *Accesibilidad y
+scripting* → *Scripting*** y desmarcar:
+
+- **«Notificar cuando un script se conecte a SAP GUI»** ← este es el del cuadro de la foto.
+- «Notificar cuando un script abra una conexión» (el otro aviso, por si aparece).
+
+Es un ajuste **por usuario de Windows y por PC**: hay que hacerlo en los tres, y no necesita
+administrador. El equivalente sin tocar la interfaz, para el mismo usuario:
+
+```
+HKEY_CURRENT_USER\Software\SAP\SAPGUI Front\SAP Frontend Server\Security
+    WarnOnAttach      (DWORD) = 0
+    WarnOnConnection  (DWORD) = 0
+```
+
+Qué se está apagando, dicho claro: el aviso de que *algún* programa usa el scripting de SAP en ese
+PC. El scripting sigue igual de restringido que antes (lo habilita Basis en el servidor); lo único
+que cambia es que SAP deja de preguntar cada vez. Si el hospital prefiere mantener el aviso, el
+medidor sigue funcionando: al primer «Aceptar» del día se engancha y no vuelve a preguntar mientras
+SAP siga abierto.
+
+**Lo que hace el medidor por su parte** para no molestar, desde la v2.0.2:
+
+- Solo se engancha con una **sesión SAP abierta delante**, nunca sobre el lanzador de SAP Logon
+  (donde además no hay nada que medir). Ahí estaba saliendo el cuadro de la foto.
+- Si el enganche no entra —el médico dice «Cancelar», o el scripting está apagado— **no insiste**:
+  espera 1 minuto, luego 5, 15 y 30. Antes reintentaba cada 5 o 15 segundos, que es lo que llenaba
+  la pantalla de avisos. Lo fija la promesa 33 del contrato.
+- Si tu SAP GUI usa otra clase de ventana para las sesiones (el medidor espera
+  `SAP_FRONTEND_SESSION`), el log lo dice: `ventana SAP delante que no es una sesión (clase «…»)`.
+  Se corrige desde **Configuración → config del medidor**, con `sap_clases_de_sesion`, sin
+  reinstalar nada: los PCs la reciben en el siguiente latido.
 
 ## Verificar en el primer PC (la lista de lo que solo se puede probar allí)
 
@@ -177,6 +217,8 @@ El log es la fuente de verdad. Líneas útiles:
 | `vivo · dia … · consultorio … · ganchos=ok(rearmados n) · sap=motor:sí eventos:no · spool=… · vigilante=sí` | el latido de cada 5 min |
 | `ganchos: degradado a GetLastInputInfo…` / `ganchos: rearmados (n)` | el antivirus no dejó los ganchos / Windows los quitó y se volvieron a poner |
 | `sap: enganchado al motor de scripting` / `sap: se soltó el motor (…)` | ve pantallas SAP / SAP se cerró; reintenta solo |
+| `sap: no se pudo enganchar (…); siguiente intento en N s` | SAP no dejó engancharse (el médico canceló, o el scripting está apagado): mira el apartado del aviso |
+| `sap: ventana SAP delante que no es una sesión (clase «…»)` | era el lanzador de SAP Logon, no una sesión: no se engancha a propósito |
 | `jornada: nueva AAAA-MM-DD` | el cambio de día a las 06:00 |
 | `subidor: subido: N jornadas · N muestras …` | lo que salió en cada latido |
 | `subidor: veneno sacado: muestras#N` | una fila que el servidor rechazó (ver `rechazadas` en el servidor) |

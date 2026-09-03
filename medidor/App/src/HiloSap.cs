@@ -21,15 +21,18 @@ public sealed class HiloSap : IDisposable
     private readonly Thread _hilo;
     private readonly Func<string, bool> _esProcesoSap;
     private readonly Func<int> _cadenciaMs;
+    private readonly Func<string, bool> _esVentanaDeSesion;
+    private string _claseAnotada = "";
     private readonly SapGui _sap = new();
     private volatile bool _vivo = true;
     private volatile VistaSap _ultima = VistaSap.Nada;
     private volatile int _saltadosPorBusy;
 
-    public HiloSap(Func<string, bool> esProcesoSap, Func<int> cadenciaMs)
+    public HiloSap(Func<string, bool> esProcesoSap, Func<int> cadenciaMs, Func<string, bool> esVentanaDeSesion)
     {
         _esProcesoSap = esProcesoSap;
         _cadenciaMs = cadenciaMs;
+        _esVentanaDeSesion = esVentanaDeSesion;
         _hilo = new Thread(Bucle) { IsBackground = true, Name = "medidor-sap" };
         _hilo.SetApartmentState(ApartmentState.STA);
     }
@@ -66,7 +69,18 @@ public sealed class HiloSap : IDisposable
                 }
                 else
                 {
-                    var vista = _sap.Mirar(raiz);
+                    // Engancharse al scripting saca un aviso en la pantalla del médico, así que solo
+                    // se intenta con una SESIÓN SAP delante, no con el lanzador de SAP Logon (donde
+                    // encima no hay nada que medir). Con el motor ya enganchado esto no estorba: se
+                    // sigue mirando igual, sin volver a engancharse.
+                    var clase = Win32.ClaseDeVentana(raiz);
+                    var esSesion = _esVentanaDeSesion(clase);
+                    if (!esSesion && !_sap.Enganchado && clase != _claseAnotada)
+                    {
+                        _claseAnotada = clase;
+                        Registro.Anota("sap", $"ventana SAP delante que no es una sesión (clase «{clase}»): no se engancha");
+                    }
+                    var vista = _sap.Mirar(raiz, esSesion);
                     if (vista.EstabaOcupado) _saltadosPorBusy++;
                     _ultima = vista;
                 }

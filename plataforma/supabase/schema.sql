@@ -64,6 +64,7 @@ values (1, 'Hospital General de Medellín', 1, jsonb_build_object(
   'reglas_identidad', jsonb_build_array(
     jsonb_build_object('id','titulo-patnr','tcode','*','fuente','titulo_sap',
       'patron','(?:PATNR|[Pp]aciente|[Nn]HC)\D*0*([0-9]{5,10})','normalizar','digitos_sin_ceros')),
+  'sap_clases_de_sesion', jsonb_build_array('SAP_FRONTEND_SESSION'),
   'foreground_ms', 1000, 'sap_identity_ms', 1500, 'solo_foreground', false))
 on conflict (id) do nothing;
 
