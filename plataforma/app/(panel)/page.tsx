@@ -17,7 +17,11 @@ export default async function InicioPage() {
   const hoy = hoyOperativo();
   const ahora = new Date().toISOString();
   const [estados, serie] = await Promise.all([estadoConsultorios(), serieDiaria(leerFiltros({ rango: "7d" }))]);
-  const dias = await Promise.all(estados.map((e) => lineaDeTiempoDia(e.consultorio.id, hoy)));
+  // Los tres días UNO DETRÁS DE OTRO, no a la vez: cada uno ya lanza cinco consultas en
+  // paralelo, y quince de golpe sobre un pool de diez en un arranque en frío del servidor
+  // dejaron la primera visita del panel en el reloj de 20 s (2026-09-03, logs de Vercel).
+  const dias: Awaited<ReturnType<typeof lineaDeTiempoDia>>[] = [];
+  for (const e of estados) dias.push(await lineaDeTiempoDia(e.consultorio.id, hoy));
   const ventanas = dias.flatMap((d) => (d ? [ventanaAuto(d, ahora)] : []));
   const ventana: Ventana | undefined = ventanas.length
     ? { desde: Math.min(...ventanas.map((v) => v.desde)), hasta: Math.max(...ventanas.map((v) => v.hasta)) }
