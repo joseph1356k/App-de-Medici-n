@@ -29,8 +29,8 @@ export default async function ExportarPage({ searchParams }: { searchParams: Pro
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-ink">Exportar</h1>
-        <p className="text-sm text-muted">Todos los datos del rango y consultorio elegidos. Sin contenido clínico: los pacientes son huellas, las pantallas son identidades técnicas, del tecleo solo hay cantidades.</p>
+        <h1 className="titulo-pagina">Exportar</h1>
+        <p className="sub-pagina">Todos los datos del rango y consultorio elegidos. Sin contenido clínico: los pacientes son huellas, las pantallas son identidades técnicas, del tecleo solo hay cantidades.</p>
       </div>
       <Filtros f={f} consultorios={consultorios} ruta="/exportar" />
 

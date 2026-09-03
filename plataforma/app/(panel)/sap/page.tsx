@@ -18,8 +18,8 @@ export default async function SapPage({ searchParams }: { searchParams: Promise<
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-ink">Pantallas SAP</h1>
-        <p className="text-sm text-muted">Las transacciones y pantallas por las que pasan los médicos, con sus tiempos. Identidad técnica de la pantalla (SID/transacción/programa/dynpro), nunca su contenido.</p>
+        <h1 className="titulo-pagina">Pantallas SAP</h1>
+        <p className="sub-pagina">Las transacciones y pantallas por las que pasan los médicos, con sus tiempos. Identidad técnica de la pantalla (SID/transacción/programa/dynpro), nunca su contenido.</p>
       </div>
       <Filtros f={f} consultorios={consultorios} ruta="/sap" />
 
@@ -35,7 +35,7 @@ export default async function SapPage({ searchParams }: { searchParams: Promise<
             </div>
             <div className="lg:col-span-3">
               <Seccion titulo="Tiempos por transacción" sub="Medianas por visita. «Lista en» = time-to-ready (llegada → primer fin de round-trip sin ocupado). «Espera» = suma de round-trips en la visita.">
-                <div className="overflow-x-auto">
+                <div className="caja-tabla">
                   <table className="tabla">
                     <thead><tr><th>Transacción</th><th className="num">Visitas</th><th className="num">Jornadas</th><th className="num">Pacientes</th><th className="num">Estadía</th><th className="num">Lista en p50</th><th className="num">p95</th><th className="num">Espera</th><th className="num">Round-trips</th></tr></thead>
                     <tbody>
@@ -74,7 +74,7 @@ export default async function SapPage({ searchParams }: { searchParams: Promise<
           <Seccion titulo="Pantallas exactas" sub="Transacción + programa + dynpro (+ subpantalla). Es la identidad con la que el asistente aprende a navegar.">
             <details>
               <summary className="cursor-pointer text-sm text-accent">Ver las {superficies.length} pantallas</summary>
-              <div className="mt-2 overflow-x-auto">
+              <div className="caja-tabla mt-2">
                 <table className="tabla">
                   <thead><tr><th>Pantalla</th><th className="num">Visitas</th><th className="num">Estadía</th><th className="num">Lista en</th><th className="num">Espera</th></tr></thead>
                   <tbody>

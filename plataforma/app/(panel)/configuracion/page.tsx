@@ -18,14 +18,14 @@ export default async function ConfiguracionPage({ searchParams }: { searchParams
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-ink">Configuración</h1>
-        <p className="text-sm text-muted">Todo lo de aquí llega a los PCs en su siguiente latido (un minuto). No hay que reinstalar nada.</p>
+        <h1 className="titulo-pagina">Configuración</h1>
+        <p className="sub-pagina">Todo lo de aquí llega a los PCs en su siguiente latido (un minuto). No hay que reinstalar nada.</p>
       </div>
       {sp.ok && <p className="rounded-lg bg-good-soft px-4 py-2 text-sm text-good-text">{sp.ok}</p>}
       {sp.error && <p className="rounded-lg bg-critical-soft px-4 py-2 text-sm text-critical">{sp.error}</p>}
 
       <Seccion titulo="Consultorios" sub="La unidad del estudio: un consultorio, un PC compartido, una jornada por día. No se borran (las muestras ya estampadas apuntan a ellos): se desactivan. El PC de cada uno se asigna en Dispositivos.">
-        <div className="overflow-x-auto">
+        <div className="caja-tabla">
           <table className="tabla">
             <thead><tr><th>Nombre</th><th className="num">Orden</th><th>Activo</th><th className="num">PCs</th><th className="num">Jornadas</th><th></th></tr></thead>
             <tbody>

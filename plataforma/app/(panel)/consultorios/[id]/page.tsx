@@ -2,10 +2,10 @@ import Link from "next/link";
 import { AutoRefresco } from "@/components/AutoRefresco";
 import { LineaDeTiempoDia } from "@/components/LineaDeTiempoDia";
 import { Calidad, ChipFase, Insignia, Seccion, Tile, Vacio } from "@/components/ui";
-import { lineaDeTiempoDia } from "@/lib/consultas";
+import { encuentrosDelDia, lineaDeTiempoDia } from "@/lib/consultas";
 import { hoyOperativo, leerFecha, sumarDias, type Sp } from "@/lib/filtros";
 import { ETIQUETA_EVENTO, fmtFecha, fmtHora, fmtMin, fmtNum, fmtPct, fmtSeg, glifoEvento } from "@/lib/formato";
-import { indicePacientes, ventanaAuto, ventanaDesdeQuery } from "@/lib/linea-tiempo";
+import { indicePacientes, leerDetalle, ventanaAuto, ventanaDesdeQuery } from "@/lib/linea-tiempo";
 import { totalesPorEstado } from "@/lib/segmentos";
 
 const ETIQUETA_CALIDAD: Record<string, string> = {
@@ -34,10 +34,11 @@ export default async function ConsultorioDiaPage({ params, searchParams }: { par
   const fecha = leerFecha(sp);
   const esHoy = fecha === hoy;
   const ahora = new Date().toISOString();
-  const datos = await lineaDeTiempoDia(id, fecha);
+  const [datos, encuentros] = await Promise.all([lineaDeTiempoDia(id, fecha), encuentrosDelDia(id, fecha)]);
   if (!datos) return <Vacio titulo="Consultorio no encontrado" texto="Puede que se haya borrado o que el enlace sea viejo. Los consultorios se administran en Configuración." />;
 
   const zoom = { desde: uno(sp, "desde"), hasta: uno(sp, "hasta") };
+  const detalle = leerDetalle(uno(sp, "detalle"));
   const ventana = ventanaDesdeQuery(ventanaAuto(datos, ahora), fecha, zoom.desde, zoom.hasta);
   const r = datos.resumen;
   const tot = totalesPorEstado(datos.segmentos);
@@ -46,12 +47,29 @@ export default async function ConsultorioDiaPage({ params, searchParams }: { par
   const href = (f: string) => `/consultorios/${id}?fecha=${f}`;
   const calidad = Object.entries(r?.calidad ?? {}).filter(([k]) => k in ETIQUETA_CALIDAD);
 
+  // Los ENCUENTROS son la fuente buena (los calcula el resumen: SAP, tecleo, clics,
+  // post-atención, hueco hasta el siguiente). Mientras el resumen no haya corrido todavía
+  // —los primeros minutos de un día en curso— caen los pacientes derivados de las cubetas,
+  // que traen menos columnas pero existen ya. Las que faltan van en «—», nunca en cero.
+  const filasPacientes = encuentros.length > 0
+    ? encuentros.map((e) => ({
+        key: e.encounter_key, n: indice[e.encounter_key] ?? e.orden, primera: e.primera_vez, ultima: e.ultima_vez,
+        consulta: e.consulta_ms, activo: e.activo_ms, his: e.his_ms, typing: e.typing_ms, keystrokes: e.keystrokes, clicks: e.clicks,
+        visitas: e.visitas, pantallas: e.pantallas_distintas, post: e.post_atencion_ms, siguiente: e.siguiente_ms,
+        tramos: e.tramos, quien: e.medico ?? e.sap_user,
+      }))
+    : datos.pacientes.map((p) => ({
+        key: p.encounter_key, n: indice[p.encounter_key], primera: p.primera_vez, ultima: p.ultima_vez,
+        consulta: p.consulta_ms, activo: p.activo_ms, his: null, typing: null, keystrokes: null, clicks: null,
+        visitas: p.visitas, pantallas: null, post: null, siguiente: null, tramos: p.tramos, quien: null,
+      }));
+
   return (
     <div className="space-y-6">
       <div>
         <Link href="/" className="text-sm text-accent hover:underline print:hidden">← Inicio</Link>
         <div className="mt-1 flex flex-wrap items-center justify-between gap-3">
-          <h1 className="text-2xl font-semibold tracking-tight text-ink">{datos.consultorio.nombre} · {fmtFecha(fecha)}</h1>
+          <h1 className="titulo-pagina">{datos.consultorio.nombre} · {fmtFecha(fecha)}</h1>
           <nav aria-label="Cambiar de día" className="flex flex-wrap items-center gap-1 text-sm print:hidden">
             <Link href={href(sumarDias(fecha, -1))} className="boton">◀ ayer</Link>
             {esHoy ? <span className="boton opacity-50" aria-disabled="true">hoy</span> : <Link href={href(hoy)} className="boton">hoy</Link>}
@@ -81,8 +99,8 @@ export default async function ConsultorioDiaPage({ params, searchParams }: { par
           : "Ese día ningún PC estaba asignado a este consultorio. Los PCs se asignan en Dispositivos."} />
       ) : (
         <>
-          <Seccion titulo="Línea de tiempo" sub="Cada cubeta de 15 s en uno de cuatro estados; encima, la app delante, las pantallas SAP con su espera, los pacientes (P1, P2… huellas, no nombres) y los eventos del medidor. Pasa el cursor para el detalle.">
-            <LineaDeTiempoDia datos={datos} modo="completo" ventana={ventana} ahora={ahora} zoom={zoom} />
+          <Seccion titulo="Línea de tiempo" sub="Cada cubeta de 15 s en uno de cuatro estados; encima, la app delante, las pantallas SAP con su espera, los pacientes (P1, P2… huellas, no nombres) y los eventos del medidor. «Tamaño» la abre a 2× o 4× del ancho (con desplazamiento propio); un clic en una hora del eje amplía esa hora.">
+            <LineaDeTiempoDia datos={datos} modo="completo" ventana={ventana} ahora={ahora} zoom={zoom} detalle={detalle} />
           </Seccion>
 
           <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5">
@@ -100,37 +118,47 @@ export default async function ConsultorioDiaPage({ params, searchParams }: { par
             <Tile label="Cola de documentación" value={fmtMin(r?.cola_post_jornada_ms)} sub={r ? `en SAP tras abrir al último paciente · consulta p25–p75 ${fmtMin(r.consulta_ms_p25)} – ${fmtMin(r.consulta_ms_p75)}` : "en SAP tras abrir al último paciente"} />
           </div>
 
-          <Seccion titulo={`Pacientes (${datos.pacientes.length})`} sub="Cada paciente es una huella irreversible calculada en el PC — nunca un nombre ni un documento. El P# es el mismo de las bandas de la línea de tiempo.">
-            {datos.pacientes.length === 0 ? <p className="text-sm text-muted">Sin pacientes identificados. Si SAP estaba abierto, revisa la regla de extracción en Configuración o si el PC tiene SAP GUI Scripting.</p> : (
-              <div className="overflow-x-auto">
-                <table className="tabla">
-                  <thead><tr><th>P#</th><th>Huella</th><th>Primera vez</th><th>Última vez</th><th className="num">Consulta</th><th className="num">Activo</th><th className="num">Visitas SAP</th><th className="num">Tramos</th></tr></thead>
-                  <tbody>
-                    {datos.pacientes.map((p) => {
-                      const n = indice[p.encounter_key];
-                      return (
-                        <tr key={p.encounter_key}>
-                          <td className="whitespace-nowrap font-semibold text-ink"><span className="linea-dia__muestra" style={{ background: colorPaciente(n) }} aria-hidden />P{n}</td>
-                          <td className="font-mono text-xs text-secondary">{p.encounter_key.slice(0, 12)}…</td>
-                          <td className="tabular">{fmtHora(p.primera_vez)}</td>
-                          <td className="tabular">{fmtHora(p.ultima_vez)}</td>
-                          <td className="num">{fmtMin(p.consulta_ms)}</td>
-                          <td className="num">{fmtMin(p.activo_ms)}</td>
+          <Seccion titulo={`Pacientes (${filasPacientes.length})`} sub="Lo que costó cada consulta. El paciente es una huella irreversible calculada en el PC — nunca un nombre ni un documento — y el P# es el mismo de las bandas de la línea de tiempo.">
+            {filasPacientes.length === 0 ? <p className="text-sm text-muted">Sin pacientes identificados. Si SAP estaba abierto, revisa la regla de extracción en Configuración o si el PC tiene SAP GUI Scripting.</p> : (
+              <>
+                <div className="caja-tabla caja-tabla--alta">
+                  <table className="tabla tabla--cebra">
+                    <thead><tr><th>P#</th><th>Huella</th><th>Primera vez</th><th>Última vez</th><th className="num">Consulta</th><th className="num">Activo</th><th className="num">En SAP</th><th className="num">Escrib.</th><th className="num">Teclas</th><th className="num">Clics</th><th className="num">Visitas SAP</th><th className="num">Pantallas</th><th className="num">Post-atención</th><th className="num">Al siguiente</th><th className="num">Tramos</th><th>Usuario SAP</th></tr></thead>
+                    <tbody>
+                      {filasPacientes.map((p) => (
+                        <tr key={p.key}>
+                          <td className="whitespace-nowrap font-semibold text-ink"><span className="linea-dia__muestra" style={{ background: colorPaciente(p.n) }} aria-hidden />P{p.n}</td>
+                          <td className="font-mono text-xs text-secondary">{p.key.slice(0, 12)}…</td>
+                          <td className="tabular">{fmtHora(p.primera)}</td>
+                          <td className="tabular">{fmtHora(p.ultima)}</td>
+                          <td className="num">{fmtMin(p.consulta)}</td>
+                          <td className="num">{fmtMin(p.activo)}</td>
+                          <td className="num">{fmtMin(p.his)}</td>
+                          <td className="num">{fmtMin(p.typing)}</td>
+                          <td className="num">{fmtNum(p.keystrokes)}</td>
+                          <td className="num">{fmtNum(p.clicks)}</td>
                           <td className="num">{fmtNum(p.visitas)}</td>
+                          <td className="num">{fmtNum(p.pantallas)}</td>
+                          <td className="num">{fmtMin(p.post)}</td>
+                          <td className="num">{fmtMin(p.siguiente)}</td>
                           <td className="num">{fmtNum(p.tramos)}{p.tramos > 1 && <span className="text-muted" title="volvió a este paciente después de abrir otro"> ↩</span>}</td>
+                          <td className="font-mono text-xs text-muted">{p.quien ?? "—"}</td>
                         </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {encuentros.length === 0 && (
+                  <p className="mt-2 text-xs text-muted">Estos pacientes salen de las cubetas: el resumen de la jornada (que añade SAP, tecleo, clics, post-atención y el hueco hasta el siguiente) todavía no ha corrido. Se calcula como máximo cada 5 minutos.</p>
+                )}
+              </>
             )}
           </Seccion>
 
           <Seccion titulo={`Recorrido por SAP (${datos.visitas.length} pantallas)`} sub="Cada fila es una estadía en una pantalla: cuánto duró, cuánto tardó SAP en dejarla lista, cuánto se esperó al servidor, y a dónde se fue después.">
             {datos.visitas.length === 0 ? <p className="text-sm text-muted">Sin visitas SAP. O no se usó SAP, o el scripting de SAP GUI no está habilitado en ese PC (el medidor igual cuenta el tiempo en SAP como app).</p> : (
-              <div className="max-h-[32rem] overflow-auto">
-                <table className="tabla">
+              <div className="caja-tabla caja-tabla--alta">
+                <table className="tabla tabla--cebra">
                   <thead><tr><th>Hora</th><th>Transacción</th><th>Pantalla</th><th>Paciente</th><th>Usuario</th><th className="num">Estadía</th><th className="num">Lista en</th><th className="num">Espera</th><th className="num">Round-trips</th><th>Siguiente</th></tr></thead>
                   <tbody>
                     {datos.visitas.map((v) => (

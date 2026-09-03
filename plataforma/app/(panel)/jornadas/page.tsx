@@ -21,15 +21,15 @@ export default async function JornadasPage({ searchParams }: { searchParams: Pro
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-ink">Jornadas</h1>
-        <p className="text-sm text-muted">Una jornada = un consultorio en un día operativo (corte 06:00). El horario es de la primera a la última cubeta con actividad.</p>
+        <h1 className="titulo-pagina">Jornadas</h1>
+        <p className="sub-pagina">Una jornada = un consultorio en un día operativo (corte 06:00). El horario es de la primera a la última cubeta con actividad.</p>
       </div>
       <Filtros f={f} consultorios={consultorios} ruta="/jornadas" />
       {total === 0 ? (
         <Vacio titulo="Sin jornadas" texto="No hay jornadas con estos filtros. Una jornada aparece a los pocos minutos de que un PC empiece a mandar cubetas." />
       ) : (
         <Seccion titulo={`${fmtNum(total)} jornadas`}>
-          <div className="overflow-x-auto">
+          <div className="caja-tabla">
             <table className="tabla">
               <thead><tr><th>Día</th><th>Consultorio</th><th>Fase</th><th>Horario</th><th className="num">Activo</th><th className="num">En SAP</th><th className="num">Escrib.</th><th className="num">Pacientes</th><th className="num">Consulta med.</th><th className="num">Espera SAP</th><th className="num">Cobertura</th><th>Calidad</th></tr></thead>
               <tbody>

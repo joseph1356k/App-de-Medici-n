@@ -10,7 +10,7 @@ const TOPE_MS = 8 * 3_600_000;
 export function RejillaCalor({ puntos, consultorios, dias }: { puntos: PuntoDiario[]; consultorios: { id: string; nombre: string }[]; dias: string[] }) {
   const por = new Map(puntos.map((p) => [`${p.consultorio_id}|${p.fecha}`, p]));
   return (
-    <div className="overflow-x-auto">
+    <div className="caja-tabla">
       <table className="tabla">
         <thead>
           <tr><th>Consultorio</th>{dias.map((d) => <th key={d} className="num">{fmtFecha(d)}</th>)}</tr>

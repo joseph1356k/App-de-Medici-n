@@ -62,6 +62,22 @@ export function marca(kind: string, hhmm: string, detail: Marca["detail"] = {}):
   return { t: new Date(hora(hhmm)).toISOString(), kind, detail };
 }
 
+/** «08:00» + `n` minutos, en «HH:MM» (para sembrar eventos minuto a minuto). */
+function hhmm(minutosDesdeLas8: number): string {
+  const t = 8 * 60 + minutosDesdeLas8;
+  return `${String(Math.floor(t / 60) % 24).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`;
+}
+
+/**
+ * EL DÍA QUE ROMPÍA EL CARRIL DE EVENTOS: SIN pacientes y sin visitas SAP (así que esos dos
+ * carriles no tienen nada que enseñar) y con `n` eventos apelotonados minuto a minuto, que
+ * era lo que salía en pantalla como «×16 ×9 ×7 ×2010».
+ */
+export function diaCargado(n = 40): LineaDeTiempoDia {
+  const marcas = Array.from({ length: n }, (_, i) => marca(i % 2 ? "lock" : "unlock", hhmm(i)));
+  return diaSintetico([{ desde: "08:00", hasta: "12:00", app: "chrome", surface: null }], { marcas });
+}
+
 export function diaSintetico(bloques: Bloque[], extra: { visitas?: VisitaSap[]; marcas?: Marca[]; hasta?: string; roster?: { id: string; display_name: string; sap_users: string[] }[] } = {}): LineaDeTiempoDia {
   const segmentos = segmentar(cubetas(bloques));
   const visitas = extra.visitas ?? [];

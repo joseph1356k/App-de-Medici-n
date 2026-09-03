@@ -60,8 +60,8 @@ export default async function ComparacionPage({ searchParams }: { searchParams: 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-ink">Comparación de fases</h1>
-        <p className="text-sm text-muted">Antes de Miracle, con Miracle Notes, y con Notes + Operations — la misma vara para las tres. Medianas por jornada, solo jornadas de buena calidad.</p>
+        <h1 className="titulo-pagina">Comparación de fases</h1>
+        <p className="sub-pagina">Antes de Miracle, con Miracle Notes, y con Notes + Operations — la misma vara para las tres. Medianas por jornada, solo jornadas de buena calidad.</p>
       </div>
       <Filtros f={f} consultorios={consultorios} ruta="/comparacion" />
 
@@ -69,7 +69,7 @@ export default async function ComparacionPage({ searchParams }: { searchParams: 
         <Vacio titulo="Sin datos de comparación" texto="Todavía no hay jornadas de buena calidad en el rango." />
       ) : (
         <Seccion titulo="Por fase" sub={ultimaConDatos ? `«Reducción» compara el baseline con ${ETIQUETA_FASE[ultimaConDatos]}. Negativo = bajó. Las filas del instrumento no se colorean.` : "La reducción aparece cuando haya jornadas en una fase con Miracle."}>
-          <div className="overflow-x-auto">
+          <div className="caja-tabla">
             <table className="tabla">
               <thead>
                 <tr>
@@ -100,7 +100,7 @@ export default async function ComparacionPage({ searchParams }: { searchParams: 
 
       {matriz.length > 0 && (
         <Seccion titulo="Por consultorio y fase" sub="Comparación pareada: el mismo consultorio antes y después. Activo · en SAP · pacientes · consulta mediana · post-atención · espera SAP (medianas por jornada, n = jornadas).">
-          <div className="overflow-x-auto">
+          <div className="caja-tabla">
             <table className="tabla">
               <thead><tr><th>Consultorio</th>{FASES.map((x) => <th key={x}>{ETIQUETA_FASE[x]}</th>)}</tr></thead>
               <tbody>

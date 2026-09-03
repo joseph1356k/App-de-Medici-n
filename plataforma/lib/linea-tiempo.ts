@@ -255,3 +255,100 @@ export function agruparMarcas(marcas: Marca[], esc: Escala, radio = 8): GrupoMar
   }
   return out;
 }
+
+export type GrupoDibujado = GrupoMarcas & {
+  /** Distancia al vecino más cercano, en unidades del viewBox (Infinity si está solo). */
+  hueco: number;
+  /** Sitio libre a la derecha (hasta el vecino o el borde): lo que puede ocupar una etiqueta. */
+  ancho: number;
+  /** ¿Cabe el glifo sin pisar al vecino? Si no, el grupo solo deja su marca de tinta. */
+  glifo: boolean;
+};
+
+/**
+ * QUIÉN PUEDE ESCRIBIR SU GLIFO. Un día real trae decenas de eventos y muchos caen en el
+ * mismo minuto; dibujarlos todos daba «×16 ×9 ×7 ×2010», que no es información sino sopa.
+ * La regla es geométrica y no estética: un grupo escribe su glifo solo si tiene `minimo`
+ * unidades de viewBox libres hasta el vecino más cercano. El que no las tiene sigue
+ * existiendo (su marca en el carril y su tooltip), pero calla.
+ */
+export function espaciarGrupos(grupos: GrupoMarcas[], minimo: number): GrupoDibujado[] {
+  return grupos.map((g, i) => {
+    const izq = i > 0 ? g.x - grupos[i - 1].x : Infinity;
+    const der = i < grupos.length - 1 ? grupos[i + 1].x - g.x : Infinity;
+    const hueco = Math.min(izq, der);
+    return { ...g, hueco, ancho: Math.max(0, Math.min(der, ANCHO - g.x)), glifo: hueco >= minimo };
+  });
+}
+
+// ── El tamaño del dibujo: ?detalle=ajustado|comodo|amplio ───────────────────
+// Un solo mando para las dos dimensiones. Un día de 9 h aplastado en 1 600 px convierte
+// cada cambio de estado en un pelo; «cómodo» y «amplio» le dan al mismo dibujo 2× y 4× de
+// ancho intrínseco (con barra de desplazamiento propia) y carriles más altos. `ancho` es el
+// factor del ancho del contenedor; `alto`, el de las alturas base de los carriles;
+// `minGlifo` va en unidades del viewBox y BAJA cuando el dibujo se ensancha, porque el mismo
+// glifo de 12 px ocupa menos unidades cuanto más grande es el lienzo.
+
+export type Detalle = "ajustado" | "comodo" | "amplio";
+export const DETALLES = ["ajustado", "comodo", "amplio"] as const;
+export const DETALLE_POR_DEFECTO: Detalle = "comodo";
+export const ETIQUETA_DETALLE: Record<Detalle, string> = { ajustado: "Ajustado", comodo: "Cómodo", amplio: "Amplio" };
+
+export type Medida = { ancho: number; alto: number; minGlifo: number; etiquetas: boolean };
+export const MEDIDAS: Record<Detalle, Medida> = {
+  ajustado: { ancho: 1, alto: 1.15, minGlifo: 14, etiquetas: false },
+  comodo: { ancho: 2, alto: 1.5, minGlifo: 7, etiquetas: false },
+  amplio: { ancho: 4, alto: 2, minGlifo: 6, etiquetas: true },
+};
+
+export function leerDetalle(v: string | null | undefined): Detalle {
+  return (DETALLES as readonly string[]).includes(v ?? "") ? (v as Detalle) : DETALLE_POR_DEFECTO;
+}
+
+export type Carril = { y: number; alto: number };
+export type Carriles = { c: Record<string, Carril>; alto: number; ids: string[] };
+
+/** Las alturas base en píxeles del viewBox (el eje Y NO se estira: solo X). */
+const CARRILES_BASE: Record<"completo" | "mini", [string, number][]> = {
+  completo: [["eje", 18], ["estado", 22], ["app", 22], ["sap", 18], ["pacientes", 18], ["eventos", 16]],
+  mini: [["eje", 12], ["estado", 18], ["app", 18]],
+};
+
+/**
+ * Los carriles del dibujo, escalados por el detalle y SIN los que no tienen nada que
+ * enseñar: un día sin pacientes no gasta 18 px en un carril vacío (ni una entrada de
+ * leyenda). El modo `mini` de las tarjetas de Inicio no escala nunca — sus 48 px son parte
+ * del diseño de la tarjeta.
+ */
+export function carriles(
+  modo: "completo" | "mini" = "completo",
+  detalle: Detalle = DETALLE_POR_DEFECTO,
+  hay: { sap?: boolean; pacientes?: boolean } = {},
+): Carriles {
+  const completo = modo === "completo";
+  const k = completo ? MEDIDAS[detalle].alto : 1;
+  const orden = CARRILES_BASE[modo].filter(([id]) =>
+    id === "sap" ? hay.sap !== false : id === "pacientes" ? hay.pacientes !== false : true);
+  const hueco = completo ? Math.round(2 * k) : 0;
+  const c: Record<string, Carril> = {};
+  let y = 0;
+  orden.forEach(([id, alto], i) => { if (i > 1) y += hueco; c[id] = { y, alto: Math.round(alto * k) }; y += c[id].alto; });
+  return { c, alto: y, ids: orden.map(([id]) => id).filter((id) => id !== "eje") };
+}
+
+/** La ventana de una hora que empieza en el tick `t`: el zoom de un clic sobre el eje. */
+export function horaDeTick(t: number): { desde: string; hasta: string } {
+  return { desde: horaLocal(t), hasta: horaLocal(t + HORA) };
+}
+
+/**
+ * Corre la ventana un tramo de su propio largo sin salirse del día operativo. `null` cuando
+ * ya está pegada al borde (y entonces el enlace no se dibuja, en vez de mentir).
+ */
+export function desplazarVentana(v: Ventana, fecha: string, signo: 1 | -1): Ventana | null {
+  const dia = limitesDelDia(fecha);
+  const largo = Math.min(Math.max(1, v.hasta - v.desde), dia.hasta - dia.desde);
+  const desde = acotar(v.desde + signo * largo, dia.desde, dia.hasta - largo);
+  if (desde === v.desde) return null;
+  return { desde, hasta: desde + largo };
+}

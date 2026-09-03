@@ -2,10 +2,11 @@
 // pacientes, marcas. Un día sintético (tests/fixtures/dia-sintetico.ts) hace de base.
 import { describe, it, expect } from "vitest";
 import {
-  ANCHO, agruparMarcas, escalaX, fusionar, horaLocal, indicePacientes, topApps,
+  ANCHO, DETALLES, DETALLE_POR_DEFECTO, MEDIDAS, agruparMarcas, carriles, desplazarVentana, escalaX,
+  espaciarGrupos, fusionar, horaDeTick, horaLocal, indicePacientes, leerDetalle, topApps,
   tramosApp, tramosEstado, tramosPacientes, tramosSap, ventanaAuto, ventanaDesdeQuery,
 } from "../lib/linea-tiempo";
-import { A, B, C, DIA0, FECHA, diaSintetico, hora, marca, visita } from "./fixtures/dia-sintetico";
+import { A, B, C, DIA0, FECHA, diaCargado, diaSintetico, hora, marca, visita } from "./fixtures/dia-sintetico";
 
 const HORA = 3_600_000;
 const iso = (t: number) => new Date(t).toISOString();
@@ -199,5 +200,115 @@ describe("ventanaDesdeQuery", () => {
     expect(ventanaDesdeQuery(base, FECHA, "12:00", "09:00")).toBe(base);
     const solo = ventanaDesdeQuery(base, FECHA, "09:00", null);
     expect([horaLocal(solo.desde), horaLocal(solo.hasta)]).toEqual(["09:00", "15:00"]);
+  });
+});
+
+// ── El tamaño del dibujo y el espaciado de los eventos ─────────────────────
+// Lo que arregla las dos quejas del dueño: la línea aplastada («ábrela») y el carril de
+// eventos escribiendo «×16 ×9 ×7 ×2010» encima de sí mismo.
+
+describe("carriles", () => {
+  it("mini mide 48 px pase lo que pase: su tamaño lo manda la tarjeta, no la URL", () => {
+    for (const d of DETALLES) expect(carriles("mini", d).alto).toBe(48);
+    expect(carriles("mini").ids).toEqual(["estado", "app"]);
+  });
+
+  it("el detalle escala alturas y huecos: ajustado < cómodo < amplio", () => {
+    const a = carriles("completo", "ajustado"), c = carriles("completo", "comodo"), g = carriles("completo", "amplio");
+    expect([a.alto, c.alto, g.alto]).toEqual([139, 183, 244]);
+    expect(a.c.estado.alto).toBe(25);   // 22 × 1,15
+    expect(c.c.estado.alto).toBe(33);   // 22 × 1,5
+    expect(g.c.estado.alto).toBe(44);   // 22 × 2
+    // los carriles nunca se solapan y van en orden
+    for (const { c: k, ids } of [a, c, g]) {
+      for (let i = 1; i < ids.length; i++) expect(k[ids[i]].y).toBeGreaterThanOrEqual(k[ids[i - 1]].y + k[ids[i - 1]].alto);
+    }
+  });
+
+  it("un día sin pacientes ni pantallas SAP no gasta un carril en enseñar nada", () => {
+    const k = carriles("completo", "comodo", { sap: false, pacientes: false });
+    expect(k.ids).toEqual(["estado", "app", "eventos"]);
+    expect(k.c.sap).toBeUndefined();
+    expect(k.c.pacientes).toBeUndefined();
+    expect(k.alto).toBe(123);
+    expect(k.alto).toBeLessThan(carriles("completo", "comodo").alto);
+    // el que queda sigue pegado a los de arriba: el gutter se alinea solo
+    expect(k.c.eventos.y).toBe(k.c.app.y + k.c.app.alto + 3);
+  });
+
+  it("el mínimo para escribir un glifo BAJA cuando el lienzo se ensancha", () => {
+    const anchos = DETALLES.map((d) => MEDIDAS[d].ancho);
+    const minimos = DETALLES.map((d) => MEDIDAS[d].minGlifo);
+    expect(anchos).toEqual([1, 2, 4]);
+    for (let i = 1; i < minimos.length; i++) expect(minimos[i]).toBeLessThan(minimos[i - 1]);
+    expect(MEDIDAS.amplio.etiquetas).toBe(true);
+    expect(MEDIDAS.comodo.etiquetas).toBe(false);
+  });
+});
+
+describe("leerDetalle", () => {
+  it("solo acepta los tres tamaños; cualquier otra cosa es «cómodo»", () => {
+    expect(leerDetalle("amplio")).toBe("amplio");
+    expect(leerDetalle("ajustado")).toBe("ajustado");
+    expect(leerDetalle(null)).toBe(DETALLE_POR_DEFECTO);
+    expect(leerDetalle("gigante")).toBe("comodo");
+    expect(leerDetalle("")).toBe("comodo");
+  });
+});
+
+describe("espaciarGrupos", () => {
+  const g = (xs: number[]) => xs.map((x) => ({ x, t: x, marcas: [marca("lock", "10:00")] }));
+
+  it("un grupo apretado contra su vecino calla; el que tiene sitio escribe", () => {
+    const out = espaciarGrupos(g([10, 20, 100]), 15);
+    expect(out.map((o) => o.glifo)).toEqual([false, false, true]);
+    expect(out.map((o) => o.hueco)).toEqual([10, 10, 80]);
+    // el sitio para la etiqueta es lo que hay hasta el siguiente (o hasta el borde)
+    expect(out.map((o) => o.ancho)).toEqual([10, 80, ANCHO - 100]);
+  });
+
+  it("con el lienzo más ancho el mismo día deja escribir a todos", () => {
+    expect(espaciarGrupos(g([10, 20, 100]), 5).every((o) => o.glifo)).toBe(true);
+  });
+
+  it("un grupo solo no tiene vecino que pisar, y una lista vacía no revienta", () => {
+    const [solo] = espaciarGrupos(g([500]), 999);
+    expect(solo.hueco).toBe(Infinity);
+    expect(solo.glifo).toBe(true);
+    expect(solo.ancho).toBe(500);
+    expect(espaciarGrupos([], 10)).toEqual([]);
+  });
+
+  it("40 eventos minuto a minuto: ninguno escribe a 1×, todos a 4×", () => {
+    const esc = escalaX({ desde: hora("08:00"), hasta: hora("16:00") });
+    const grupos = agruparMarcas(diaCargado(40).marcas, esc);
+    expect(grupos.length).toBe(10);
+    expect(espaciarGrupos(grupos, MEDIDAS.ajustado.minGlifo).some((o) => o.glifo)).toBe(false);
+    expect(espaciarGrupos(grupos, MEDIDAS.amplio.minGlifo).every((o) => o.glifo)).toBe(true);
+  });
+});
+
+describe("horaDeTick y desplazarVentana", () => {
+  it("un clic en una hora del eje pide esa hora, y cruza la medianoche", () => {
+    expect(horaDeTick(hora("08:00"))).toEqual({ desde: "08:00", hasta: "09:00" });
+    expect(horaDeTick(hora("23:30"))).toEqual({ desde: "23:30", hasta: "00:30" });
+  });
+
+  it("la ventana corre un tramo de su propio largo sin salirse del día operativo", () => {
+    const v = { desde: hora("08:00"), hasta: hora("09:00") };
+    const siguiente = desplazarVentana(v, FECHA, 1)!;
+    expect([horaLocal(siguiente.desde), horaLocal(siguiente.hasta)]).toEqual(["09:00", "10:00"]);
+    const anterior = desplazarVentana(v, FECHA, -1)!;
+    expect([horaLocal(anterior.desde), horaLocal(anterior.hasta)]).toEqual(["07:00", "08:00"]);
+    // ventanas más largas se mueven su propio largo, no una hora
+    const media = desplazarVentana({ desde: DIA0, hasta: DIA0 + 6 * HORA }, FECHA, 1)!;
+    expect(media.hasta - media.desde).toBe(6 * HORA);
+    expect(horaLocal(media.desde)).toBe("12:00");
+  });
+
+  it("pegada a un borde del día no se mueve (y el enlace no se dibuja)", () => {
+    expect(desplazarVentana({ desde: DIA0, hasta: DIA0 + HORA }, FECHA, -1)).toBeNull();
+    expect(desplazarVentana({ desde: DIA0 + 23 * HORA, hasta: DIA0 + 24 * HORA }, FECHA, 1)).toBeNull();
+    expect(desplazarVentana({ desde: DIA0, hasta: DIA0 + 24 * HORA }, FECHA, 1)).toBeNull();
   });
 });

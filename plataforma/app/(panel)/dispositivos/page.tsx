@@ -21,8 +21,8 @@ export default async function DispositivosPage({ searchParams }: { searchParams:
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-ink">Dispositivos</h1>
-        <p className="text-sm text-muted">Los PCs con el medidor instalado. Se registran solos la primera vez que arrancan con la clave del servidor; aquí se les asigna su consultorio (el icono del PC lo muestra en ≤ 2 min).</p>
+        <h1 className="titulo-pagina">Dispositivos</h1>
+        <p className="sub-pagina">Los PCs con el medidor instalado. Se registran solos la primera vez que arrancan con la clave del servidor; aquí se les asigna su consultorio (el icono del PC lo muestra en ≤ 2 min).</p>
       </div>
       {sp.ok && <p className="rounded-lg bg-good-soft px-4 py-2 text-sm text-good-text">{sp.ok}</p>}
       {sp.error && <p className="rounded-lg bg-critical-soft px-4 py-2 text-sm text-critical">{sp.error}</p>}
@@ -32,7 +32,7 @@ export default async function DispositivosPage({ searchParams }: { searchParams:
         <Vacio titulo="Ningún PC registrado todavía" texto="Instala el medidor en un PC (doble clic en Medidor.exe, o medidor/instalar.ps1 con la URL de este servidor y la clave). Aparecerá aquí en su primer latido." />
       ) : (
         <Seccion titulo={`${lista.length} dispositivos`}>
-          <div className="overflow-x-auto">
+          <div className="caja-tabla">
             <table className="tabla">
               <thead><tr><th>PC</th><th>Consultorio</th><th>Estado</th><th>Último latido</th><th>Última cubeta</th><th className="num">Jornadas</th><th>Versión</th><th>Acciones</th></tr></thead>
               <tbody>

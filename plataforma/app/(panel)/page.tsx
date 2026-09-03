@@ -32,8 +32,8 @@ export default async function InicioPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-2">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-ink">Consultorios, ahora</h1>
-          <p className="text-sm text-muted">Qué pasa en cada PC en este momento y cómo va el día operativo del {fmtFecha(hoy)} (corte 06:00). Tiempo, escritura, clics, pantallas y esperas: nunca contenido clínico.</p>
+          <h1 className="titulo-pagina">Consultorios, ahora</h1>
+          <p className="sub-pagina">Qué pasa en cada PC en este momento y cómo va el día operativo del {fmtFecha(hoy)} (corte 06:00). Tiempo, escritura, clics, pantallas y esperas: nunca contenido clínico.</p>
         </div>
         <AutoRefresco ahora={ahora} />
       </div>

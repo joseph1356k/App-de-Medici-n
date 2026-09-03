@@ -309,6 +309,43 @@ export async function porApp(f: Filtros): Promise<FilaApp[]> {
     group by a.key order by sum(a.value::bigint) desc limit 8`;
 }
 
+export type FilaAppDetalle = {
+  app: string; jornadas: number; activo_ms: number; foreground_ms: number; typing_ms: number; keystrokes: number; clicks: number;
+};
+
+/**
+ * Lo mismo que `porApp` pero con lo que se hizo dentro de cada app, no solo cuánto duró:
+ * `jornada_summary.por_app` es {app: {activo_ms, foreground_ms, typing_ms, keystrokes,
+ * clicks}} y aquí se suma clave a clave sobre las jornadas del filtro. `bloqueado` no es una
+ * app (es el estado de la sesión de Windows) y se queda fuera, igual que en `porApp`.
+ */
+export async function porAppDetalle(f: Filtros): Promise<FilaAppDetalle[]> {
+  return sql<FilaAppDetalle[]>`
+    select a.key as app, count(*)::int as jornadas,
+      sum(coalesce((a.value->>'activo_ms')::bigint, 0))::bigint as activo_ms,
+      sum(coalesce((a.value->>'foreground_ms')::bigint, 0))::bigint as foreground_ms,
+      sum(coalesce((a.value->>'typing_ms')::bigint, 0))::bigint as typing_ms,
+      sum(coalesce((a.value->>'keystrokes')::bigint, 0))::bigint as keystrokes,
+      sum(coalesce((a.value->>'clicks')::bigint, 0))::bigint as clicks
+    from jornada_summary j, lateral jsonb_each(j.por_app) a
+    where ${buenas(f)} and a.key <> 'bloqueado'
+    group by a.key
+    order by sum(coalesce((a.value->>'activo_ms')::bigint, 0)) desc
+    limit 12`;
+}
+
+export type FilaHora = { hora: string; activo_ms: number; jornadas: number };
+
+/** La forma del día: `jornada_summary.por_hora` es {"07": activo_ms, …} en hora de Bogotá;
+ * aquí se suma por hora sobre las jornadas del filtro. Devuelve solo las horas con algo. */
+export async function porHora(f: Filtros): Promise<FilaHora[]> {
+  return sql<FilaHora[]>`
+    select h.key as hora, sum(h.value::bigint)::bigint as activo_ms, count(*)::int as jornadas
+    from jornada_summary j, lateral jsonb_each_text(j.por_hora) h
+    where ${buenas(f)}
+    group by h.key order by h.key`;
+}
+
 export type FilaMedico = { sap_user: string; medico_id: string | null; nombre: string | null; jornadas: number; activo_ms: number };
 
 /** El médico como anotación: quién (por login SAP) acumuló actividad en el rango. */
