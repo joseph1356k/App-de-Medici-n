@@ -58,6 +58,7 @@ internal static class Contrato
         Prueba("29. al pasar a formato 2 las filas v1 se purgan contando, una sola vez", LasFilasV1SePurganUnaVez);
         Prueba("30. la clave de la huella se deriva por tick del día operativo: a las 05:59 y 06:01 la misma persona da huellas distintas, sin turno", LaClaveSeDerivaPorTick);
         Prueba("31. la jornada lleva proceso_id: dos fotos del mismo día desde procesos distintos se distinguen", LaJornadaLlevaProcesoId);
+        Prueba("32. un 403 de «no te conozco» vuelve a registrar; uno de pausa deliberada, no", LosDos403SeDistinguen);
 
         Console.WriteLine();
         Console.WriteLine(_fallos == 0
@@ -895,6 +896,28 @@ internal static class Contrato
         Debe(a0559 == a0200 && a0200 == ayer1900, "y de las 19:00 a las 05:59 (cruzando la medianoche) da la misma");
         Debe(Huella.DeIdentificador(ClaveEn(new DateTimeOffset(2026, 9, 2, 6, 0, 0, Bogota)), "555001") == a0601,
             "el corte es exactamente a las 06:00:00");
+    }
+
+    /// <summary>
+    /// PROMESA 32. El servidor rechaza un lote con 403 por dos razones opuestas y el medidor tiene
+    /// que distinguirlas: si no conoce el equipo (la base se recreó) hay que volver a registrarse;
+    /// si lo pausaron a propósito desde el panel, registrarse otra vez sería desobedecer.
+    /// </summary>
+    private static void LosDos403SeDistinguen()
+    {
+        // Lo que responde el servidor cuando el device_id ya no existe (app/api/medidor/lote).
+        Debe(Cable.IdentidadDesconocida("{\"error\":\"Dispositivo no encontrado. Vuelve a registrarte.\"}"),
+            "un 403 sin `status` es identidad desconocida: hay que registrarse otra vez");
+        // Y cuando alguien lo pausó o retiró desde el panel.
+        Debe(!Cable.IdentidadDesconocida("{\"error\":\"Dispositivo pausado o retirado.\",\"status\":\"paused\"}"),
+            "un 403 con `status` es una pausa deliberada: NO se vuelve a registrar");
+        Debe(!Cable.IdentidadDesconocida("{\"error\":\"Dispositivo pausado o retirado.\",\"status\":\"retired\"}"),
+            "un equipo retirado no se resucita solo");
+        // Ante la duda, no se toca nada: un cuerpo vacío o ilegible no borra una identidad válida.
+        Debe(!Cable.IdentidadDesconocida(""), "sin cuerpo no se adivina");
+        Debe(!Cable.IdentidadDesconocida(null), "sin cuerpo no se adivina");
+        Debe(!Cable.IdentidadDesconocida("no soy json"), "un cuerpo ilegible no borra la identidad");
+        Debe(!Cable.IdentidadDesconocida("[1,2,3]"), "un cuerpo que no es objeto no borra la identidad");
     }
 
     private static void LaJornadaLlevaProcesoId()

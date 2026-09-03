@@ -210,6 +210,16 @@ public sealed class Programa
         _subidor = new Subidor(_spool, _cliente, () => _identidad?.DeviceId, () => _calidad, VersionApp);
         _subidor.ConfigVersionNueva += cv => { if (cv > _config.Version) _ = RefrescarConfigAsync(); };
         _subidor.DevicePausado += () => _bandeja.Aviso("Medidor pausado", "Este equipo fue pausado desde el panel.", advertencia: true);
+        // El servidor no conoce este device_id (la base se recreó, o borraron el equipo). Se suelta
+        // la identidad guardada: el siguiente latido vuelve a registrar el PC y lo medido sigue en
+        // el spool, esperando. Sin esto el medidor mediría para nadie hasta que alguien lo reinicie.
+        _subidor.IdentidadDesconocida += () =>
+        {
+            if (_identidad == null) return;
+            Registro.Anota("registro", "el servidor no conoce este equipo: se vuelve a registrar");
+            _identidad = null;
+            _conectado = false;
+        };
         _subidor.Conectado += ok => _conectado = ok;
         _subidor.ConsultorioRecibido += AplicarConsultorio;
 

@@ -24,6 +24,8 @@ public sealed class Subidor
 
     public event Action<int>? ConfigVersionNueva;
     public event Action? DevicePausado;
+    /// <summary>El servidor no conoce este device_id: hay que volver a registrarse.</summary>
+    public event Action? IdentidadDesconocida;
     public event Action<bool>? Conectado;
 
     /// <summary>La respuesta del lote trajo la clave <c>consultorio</c>: el objeto, o null si el
@@ -71,7 +73,11 @@ public sealed class Subidor
         if (!resp.Ok)
         {
             Conectado?.Invoke(false);
-            if (resp.Codigo == 403) { DevicePausado?.Invoke(); return; }
+            if (resp.Codigo == 403)
+            {
+                if (resp.IdentidadDesconocida) IdentidadDesconocida?.Invoke(); else DevicePausado?.Invoke();
+                return;
+            }
             if (resp.RetryAfterS is int s) _proximoPermitido = DateTime.UtcNow.AddSeconds(s);
             return; // el spool intacto: se reintenta
         }

@@ -21,7 +21,7 @@ clínico. En PCs compartidos de tres consultorios, con Windows, con el asistente
 │   ├ HiloSap (STA): identidad SAP por COM, disciplina Busy      │                                  └ panel (público): inicio · día del consultorio · jornadas ·
 │   ├ Orquestador (1 s): SIEMPRE registra → normaliza → encounter│                                     comparación · SAP · dispositivos · configuración · exportar
 │   │   → cubetas 15 s (bloqueado incluido)                      │                                              │
-│   ├ Dominio (puro, 31 promesas): Reloj, Actividad, Escritura,  │                                              ▼
+│   ├ Dominio (puro, 32 promesas): Reloj, Actividad, Escritura,  │                                              ▼
 │   │   Cubetas, Huella HMAC, Jornada, Continuidad, Viaje SAP,   │                                  Postgres (Supabase): settings · roster · study_phases · consultorios ·
 │   │   Calidad, SaludDeGanchos, GuardiaDeRelanzos               │                                  devices · jornadas · samples · events · sap_visits · jornada_summary
 │   ├ SpoolSqlite: durable, ack antes de borrar, tope 200 MB,    │
@@ -109,8 +109,8 @@ input en 60 s; escritura por ráfagas sin teclas) · 10-11 cubetas (partición s
 usuario SAP; cada ms en una cubeta de 15 s) · 12-13 continuidad (la jornada cambia sola a las 06:00; un PC
 bloqueado sigue emitiendo cubetas `bloqueado`) · 14-17 spool (no pierde ni duplica; descarta contando;
 topes y veneno por nombre del spool; uid sobrevive al reinicio) · 18 calidad · 19-21 viaje SAP · 22 cable
-v2 · 23 teclas de control · 24-31 resiliencia (huecos de un reloj atascado, rearme de ganchos, guardia de
-relanzos, spool corrupto, compactación de fotos, purga v1, clave por tick, `proceso_id`).
+v2 · 23 teclas de control · 24-32 resiliencia (huecos de un reloj atascado, rearme de ganchos, guardia de
+relanzos, spool corrupto, compactación de fotos, purga v1, clave por tick, `proceso_id`, los dos 403).
 
 ## Lo que queda por comprobar en un PC real
 

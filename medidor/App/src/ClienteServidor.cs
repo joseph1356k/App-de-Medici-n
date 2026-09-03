@@ -18,7 +18,8 @@ public sealed record RespuestaDeLote(
     IReadOnlyList<(string Coleccion, long Seq)> Veneno,
     IReadOnlyList<(string Coleccion, long Seq)> NoProcesadas,
     int? ConfigVersion, int? HmacVersion, long? DesfaseMs, int? RetryAfterS,
-    bool TraeConsultorio, ConsultorioDelServidor? Consultorio);
+    bool TraeConsultorio, ConsultorioDelServidor? Consultorio,
+    bool IdentidadDesconocida = false);
 
 /// <summary>
 /// El caño con la plataforma. Todo SALIENTE, con <c>X-API-Key</c> en cada petición: nunca un puerto
@@ -72,8 +73,13 @@ public sealed class ClienteServidor
     {
         var (ok, codigo, texto) = await PostAsync("api/medidor/lote", cuerpo);
         if (!ok)
+        {
+            // Un 403 sin `status` es «este device_id ya no existe»: hay que registrarse otra vez.
+            // Uno con `status` es una pausa deliberada desde el panel y se respeta.
+            var desconocida = codigo == 403 && Cable.IdentidadDesconocida(texto);
             return new RespuestaDeLote(false, codigo, LoteTomado.Nada, Array.Empty<(string, long)>(), Array.Empty<(string, long)>(),
-                null, null, null, RetryAfterDe(codigo), false, null);
+                null, null, null, RetryAfterDe(codigo), false, null, desconocida);
+        }
 
         // El servidor aceptó el lote (200): se confirma lo enviado menos lo rechazado (veneno) y
         // menos lo no procesado (se reenvía). Solo tras el 200 se toca el spool.

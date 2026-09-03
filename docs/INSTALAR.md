@@ -172,6 +172,7 @@ El log es la fuente de verdad. Líneas útiles:
 | `ajustes: leídos de …` | de dónde tomó servidor y clave |
 | `registro: sin red o servidor caído` / `rechazado (401)` | no llega al servidor / clave mal |
 | `registro: ok · config vN · hmac vN` | registrado |
+| `registro: el servidor no conoce este equipo: se vuelve a registrar` | la base se recreó; el PC se re-registra solo en el siguiente latido |
 | `instalador: tarea Medidor-Vigilante registrada` / `no se pudo crear la tarea (…)` | el vigilante |
 | `vivo · dia … · consultorio … · ganchos=ok(rearmados n) · sap=motor:sí eventos:no · spool=… · vigilante=sí` | el latido de cada 5 min |
 | `ganchos: degradado a GetLastInputInfo…` / `ganchos: rearmados (n)` | el antivirus no dejó los ganchos / Windows los quitó y se volvieron a poner |

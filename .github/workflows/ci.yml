@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  # El contrato del instrumento: 31 promesas, sin pantalla, en Linux, en menos de un segundo.
+  # El contrato del instrumento: 32 promesas, sin pantalla, en Linux, en menos de un segundo.
   # Y la App se compila aquí mismo: antes el primer compilado de App era el publish.
   contrato:
     runs-on: ubuntu-latest

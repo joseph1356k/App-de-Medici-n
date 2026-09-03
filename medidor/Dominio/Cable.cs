@@ -137,6 +137,27 @@ public static class Cable
         _ => null,
     };
 
+    /// <summary>
+    /// UN 403 NO ES SIEMPRE EL MISMO 403. El servidor rechaza un lote por dos razones opuestas:
+    ///   · «Dispositivo no encontrado. Vuelve a registrarte» — el device_id que guarda este PC ya
+    ///     no existe (la base se recreó, o al equipo lo borraron). La cura es registrarse otra vez.
+    ///   · «Dispositivo pausado o retirado» (trae `status`) — alguien lo apagó A PROPÓSITO desde el
+    ///     panel. Registrarse otra vez lo resucitaría, que es justo lo contrario de lo que se pidió.
+    /// Tratarlos igual deja al medidor midiendo para nadie hasta que alguien reinicie el proceso.
+    /// </summary>
+    public static bool IdentidadDesconocida(string? cuerpo)
+    {
+        if (string.IsNullOrWhiteSpace(cuerpo)) return false; // sin cuerpo no se adivina: se deja como está
+        try
+        {
+            using var doc = JsonDocument.Parse(cuerpo);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object) return false;
+            // `status` solo viaja cuando el equipo existe y está pausado o retirado.
+            return !doc.RootElement.TryGetProperty("status", out _);
+        }
+        catch { return false; }
+    }
+
     private static string Dia(DateOnly d) => d.ToString("yyyy-MM-dd");
 }
 
