@@ -127,12 +127,16 @@ public sealed class ConfigDeMedicion
     }
 }
 
-/// <summary>La identidad de esta instalación: lo que el registro devolvió. El secreto HMAC NO vive
-/// aquí — vive cifrado aparte (DPAPI), y nunca se serializa junto al resto.</summary>
+/// <summary>La identidad de esta instalación: lo que el registro devolvió, más el consultorio que el
+/// panel le asignó a este PC (llega en el registro y en la respuesta de cada lote; el PC no elige
+/// nada). El secreto HMAC NO vive aquí — vive cifrado aparte (DPAPI), y nunca se serializa junto al
+/// resto. Los estado.json de la v1 (con «Roster») siguen cargando: lo que sobra se ignora.</summary>
 public sealed class Identidad
 {
     [JsonPropertyName("device_id")] public string DeviceId { get; set; } = "";
     [JsonPropertyName("hospital")] public string Hospital { get; set; } = "";
     [JsonPropertyName("hmac_version")] public int HmacVersion { get; set; }
     [JsonPropertyName("config_version")] public int ConfigVersion { get; set; }
+    [JsonPropertyName("consultorio_id")] public string? ConsultorioId { get; set; }
+    [JsonPropertyName("consultorio_nombre")] public string? ConsultorioNombre { get; set; }
 }

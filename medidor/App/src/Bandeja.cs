@@ -3,36 +3,30 @@ using System.Runtime.Versioning;
 
 namespace Medidor.App;
 
-/// <summary>Un médico del roster: lo que el menú muestra. El id es opaco (uuid del servidor); el
-/// nombre es lo que el médico reconoce; los usuarios SAP sirven para asignar el turno solo.</summary>
-public sealed record MedicoDelRoster(string Id, string Nombre, IReadOnlyList<string> UsuariosSap);
-
-/// <summary>Lo que el usuario eligió en el menú de la bandeja.</summary>
+/// <summary>Lo que el usuario eligió en el menú de la bandeja. Solo dos cosas: ver qué se mide y
+/// abrir el panel. Ni pausar, ni salir, ni elegir médico: el PC es del consultorio y graba siempre
+/// (decisión del hospital, ver docs/PRIVACIDAD.md).</summary>
 public abstract record AccionDeMenu
 {
-    public sealed record ElegirMedico(MedicoDelRoster Medico) : AccionDeMenu;
-    public sealed record CerrarTurno : AccionDeMenu;
-    public sealed record Pausar : AccionDeMenu;
-    public sealed record Reanudar : AccionDeMenu;
     public sealed record QueSeMide : AccionDeMenu;
     public sealed record VerPanel : AccionDeMenu;
-    public sealed record Salir : AccionDeMenu;
 }
 
 /// <summary>
-/// EL INDICADOR PERMANENTE. No es negociable: «un indicador permanente y un atajo para parar no son
-/// cortesía: son lo que hace la diferencia entre una herramienta de medición y una cámara oculta».
-/// El icono de bandeja está SIEMPRE, dice el estado de un vistazo (verde midiendo con médico, ámbar
-/// sin médico, gris pausado, oscuro sin conexión) y abre el menú para elegir médico, pausar y ver
-/// qué se mide.
+/// EL INDICADOR PERMANENTE. No es negociable: «un indicador permanente y una explicación honesta de
+/// qué se mide son lo que hace la diferencia entre una herramienta de medición y una cámara
+/// oculta». El icono de bandeja está SIEMPRE, dice el estado de un vistazo (verde midiendo con
+/// consultorio asignado, ámbar sin consultorio, oscuro sin conexión) y abre el menú para ver qué
+/// se mide y entrar al panel.
 ///
 /// Shell_NotifyIcon a pelo, sin WinForms: así el .exe se construye desde Linux. Si el Explorador se
-/// reinicia, la barra manda TaskbarCreated y el icono se vuelve a poner (ver VentanaOculta).
+/// reinicia, la barra manda TaskbarCreated y el icono se vuelve a poner (ver VentanaOculta); y el
+/// latido de 5 min lo repone si por lo que sea falta (<see cref="Visible"/>).
 /// </summary>
 [SupportedOSPlatform("windows")]
 public sealed class Bandeja : IDisposable
 {
-    public enum EstadoUi { Midiendo, SinMedico, Pausado, Desconectado }
+    public enum EstadoUi { Midiendo, SinConsultorio, Desconectado }
 
     public const uint MensajeDeBandeja = Win32.WM_APP + 1;
     private const uint IdIcono = 1;
@@ -40,7 +34,7 @@ public sealed class Bandeja : IDisposable
     private readonly IntPtr _hwnd;
     private readonly Dictionary<EstadoUi, IntPtr> _iconos = new();
     private EstadoUi _estado = EstadoUi.Desconectado;
-    private string _tip = "Medidor: arrancando";
+    private string _tip = "Medidor · arrancando";
     private bool _visible;
 
     public Bandeja(IntPtr hwnd)
@@ -52,7 +46,10 @@ public sealed class Bandeja : IDisposable
 
     public EstadoUi Estado => _estado;
 
-    /// <summary>Pone el icono (o lo vuelve a poner tras un reinicio del Explorador).</summary>
+    /// <summary>Si la última operación con la barra salió bien. false = hay que volver a Mostrar.</summary>
+    public bool Visible => _visible;
+
+    /// <summary>Pone el icono (o lo vuelve a poner tras un reinicio del Explorador o un fallo).</summary>
     public void Mostrar()
     {
         var d = Datos(Win32.NIF_MESSAGE | Win32.NIF_ICON | Win32.NIF_TIP | Win32.NIF_SHOWTIP);
@@ -60,24 +57,36 @@ public sealed class Bandeja : IDisposable
         d.hIcon = _iconos[_estado];
         d.szTip = Recortar(_tip, 127);
         _visible = Win32.Shell_NotifyIconW(Win32.NIM_ADD, ref d);
-        if (!_visible) Registro.Anota("bandeja", "Shell_NotifyIcon NIM_ADD falló: el icono no está visible");
+        if (!_visible)
+        {
+            // NIM_ADD falla si el icono YA está (un proceso anterior no lo quitó): entonces modificar
+            // es lo que lo repone. Si ni así, queda escrito y el latido lo reintenta.
+            _visible = Win32.Shell_NotifyIconW(Win32.NIM_MODIFY, ref d);
+            if (!_visible) Registro.Anota("bandeja", "Shell_NotifyIcon NIM_ADD/NIM_MODIFY falló: el icono no está visible");
+        }
     }
 
-    public void MostrarEstado(EstadoUi estado, string? medico)
+    public void MostrarEstado(EstadoUi estado, string? consultorio)
     {
         _estado = estado;
+        var sitio = string.IsNullOrWhiteSpace(consultorio) ? "sin consultorio asignado" : consultorio;
         _tip = estado switch
         {
-            EstadoUi.Midiendo => $"Medidor: midiendo — {medico ?? "sin médico"}",
-            EstadoUi.SinMedico => "Medidor: sin médico. Clic para elegir tu nombre",
-            EstadoUi.Pausado => "Medidor: pausado",
-            _ => "Medidor: sin conexión con el servidor (guardando en el PC)",
+            EstadoUi.Midiendo => $"Medidor · {sitio} · midiendo",
+            EstadoUi.SinConsultorio => "Medidor · sin consultorio asignado (asígnalo en el panel) · midiendo",
+            _ => $"Medidor · {sitio} · sin conexión (guardando en el PC)",
         };
         if (!_visible) { Mostrar(); return; }
         var d = Datos(Win32.NIF_ICON | Win32.NIF_TIP | Win32.NIF_SHOWTIP);
         d.hIcon = _iconos[estado];
         d.szTip = Recortar(_tip, 127);
-        Win32.Shell_NotifyIconW(Win32.NIM_MODIFY, ref d);
+        if (!Win32.Shell_NotifyIconW(Win32.NIM_MODIFY, ref d))
+        {
+            // Auto-reparación: si modificar falla, el icono ya no está (Explorador reiniciado sin
+            // TaskbarCreated, sesión rara). Se vuelve a poner entero.
+            _visible = false;
+            Mostrar();
+        }
     }
 
     public void Aviso(string titulo, string texto, bool advertencia = false)
@@ -90,30 +99,18 @@ public sealed class Bandeja : IDisposable
         Win32.Shell_NotifyIconW(Win32.NIM_MODIFY, ref d);
     }
 
-    /// <summary>El menú contextual, construido al vuelo con el roster vigente. Bloquea hasta que el
-    /// usuario elige o lo cierra; devuelve null si lo cerró sin elegir.</summary>
-    public AccionDeMenu? Menu(IReadOnlyList<MedicoDelRoster> roster, string? medicoActualId, bool pausado, bool hayTurnoConMedico)
+    /// <summary>El menú contextual: una cabecera gris con el estado, «¿Qué mide esto?» y el panel.
+    /// Bloquea hasta que el usuario elige o lo cierra; devuelve null si lo cerró sin elegir.</summary>
+    public AccionDeMenu? Menu()
     {
-        const uint IdCerrar = 1, IdPausa = 2, IdQueMide = 3, IdPanel = 4, IdSalir = 5, BaseMedicos = 100;
+        const uint IdQueMide = 1, IdPanel = 2;
         var menu = Win32.CreatePopupMenu();
         try
         {
-            Win32.AppendMenuW(menu, Win32.MF_STRING | Win32.MF_GRAYED, UIntPtr.Zero, _tip.Replace("Medidor: ", ""));
-            Win32.AppendMenuW(menu, Win32.MF_SEPARATOR, UIntPtr.Zero, null);
-            if (roster.Count == 0)
-                Win32.AppendMenuW(menu, Win32.MF_STRING | Win32.MF_GRAYED, UIntPtr.Zero, "Sin médicos en la lista (se configuran en el panel)");
-            for (int i = 0; i < roster.Count; i++)
-            {
-                var marcado = roster[i].Id == medicoActualId ? Win32.MF_CHECKED : 0;
-                Win32.AppendMenuW(menu, Win32.MF_STRING | marcado, (UIntPtr)(BaseMedicos + i), roster[i].Nombre);
-            }
-            Win32.AppendMenuW(menu, Win32.MF_SEPARATOR, UIntPtr.Zero, null);
-            Win32.AppendMenuW(menu, Win32.MF_STRING | (hayTurnoConMedico ? 0 : Win32.MF_GRAYED), (UIntPtr)IdCerrar, "Cerrar mi turno");
-            Win32.AppendMenuW(menu, Win32.MF_STRING, (UIntPtr)IdPausa, pausado ? "Reanudar la medición" : "Pausar la medición");
+            Win32.AppendMenuW(menu, Win32.MF_STRING | Win32.MF_GRAYED, UIntPtr.Zero, _tip.Replace("Medidor · ", ""));
             Win32.AppendMenuW(menu, Win32.MF_SEPARATOR, UIntPtr.Zero, null);
             Win32.AppendMenuW(menu, Win32.MF_STRING, (UIntPtr)IdQueMide, "¿Qué mide esto?");
             Win32.AppendMenuW(menu, Win32.MF_STRING, (UIntPtr)IdPanel, "Ver el panel en el navegador");
-            Win32.AppendMenuW(menu, Win32.MF_STRING, (UIntPtr)IdSalir, "Salir del medidor");
 
             // El ritual de Win32 para que un menú de bandeja se cierre al hacer clic fuera: traer la
             // ventana al frente antes, y mandarle un WM_NULL después.
@@ -122,36 +119,33 @@ public sealed class Bandeja : IDisposable
             int id = Win32.TrackPopupMenuEx(menu, Win32.TPM_RETURNCMD | Win32.TPM_RIGHTBUTTON | Win32.TPM_BOTTOMALIGN, p.X, p.Y, _hwnd, IntPtr.Zero);
             Win32.PostMessageW(_hwnd, Win32.WM_NULL, IntPtr.Zero, IntPtr.Zero);
 
-            if (id >= BaseMedicos && id - BaseMedicos < roster.Count) return new AccionDeMenu.ElegirMedico(roster[(int)(id - BaseMedicos)]);
             return (uint)id switch
             {
-                IdCerrar => new AccionDeMenu.CerrarTurno(),
-                IdPausa => pausado ? new AccionDeMenu.Reanudar() : new AccionDeMenu.Pausar(),
                 IdQueMide => new AccionDeMenu.QueSeMide(),
                 IdPanel => new AccionDeMenu.VerPanel(),
-                IdSalir => new AccionDeMenu.Salir(),
                 _ => null,
             };
         }
         finally { Win32.DestroyMenu(menu); }
     }
 
-    public static void QueSeMide(IntPtr hwnd)
+    public static void QueSeMide(IntPtr hwnd, string? consultorio)
         => Win32.MessageBoxW(hwnd,
-            "Este computador mide TIEMPOS de trabajo, no contenido.\n\n"
+            "Este computador mide TIEMPOS de trabajo del consultorio, no contenido.\n\n"
             + "• Cuánto tiempo se usa cada aplicación y el sistema clínico (SAP).\n"
             + "• Cuántos clics y cuánto tecleo hay — NUNCA qué se escribe.\n"
             + "• Qué pantallas del sistema se recorren y cuánto tarda SAP — NUNCA los datos del paciente.\n\n"
-            + "El nombre del paciente, su historia y lo que escribes no salen de este computador.\n"
-            + "Puedes pausar la medición desde el icono cuando quieras.",
+            + "El nombre del paciente, su historia y lo que escribes no salen de este computador.\n\n"
+            + "Mide el consultorio, no a una persona: graba siempre —con la pantalla bloqueada solo\n"
+            + "anota «bloqueado»— y no se apaga: si se cierra, vuelve solo.\n\n"
+            + $"Consultorio: {(string.IsNullOrWhiteSpace(consultorio) ? "sin asignar todavía (se asigna desde el panel)" : consultorio)}",
             "¿Qué mide el medidor?", Win32.MB_OK | Win32.MB_ICONINFORMATION | Win32.MB_SETFOREGROUND | Win32.MB_TOPMOST);
 
     private static uint ColorDe(EstadoUi e) => e switch
     {
-        EstadoUi.Midiendo => 0x2EA043,   // verde
-        EstadoUi.SinMedico => 0xD29922,  // ámbar
-        EstadoUi.Pausado => 0x8B949E,    // gris
-        _ => 0x4A4A4A,                   // oscuro: sin conexión
+        EstadoUi.Midiendo => 0x2EA043,       // verde
+        EstadoUi.SinConsultorio => 0xD29922, // ámbar
+        _ => 0x4A4A4A,                       // oscuro: sin conexión
     };
 
     private static string Recortar(string s, int max) => s.Length <= max ? s : s[..max];

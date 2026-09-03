@@ -3,10 +3,14 @@ using System.Text.Json;
 namespace Medidor;
 
 /// <summary>
-/// EL FORMATO DE CABLE: cómo viaja cada cosa hacia `/api/v1/metrics/batch`. Los nombres de campo
+/// EL FORMATO DE CABLE v2: cómo viaja cada cosa hacia `POST /api/medidor/lote`. Los nombres de campo
 /// son snake_case porque el servidor los mapea 1:1 a columnas tipadas — el contrato espejo vive en
-/// `Graph/src/domain/metrics/vocabulario.js` y cambiarlo aquí sin cambiarlo allá es la deriva de
-/// contrato que ya pasó una vez (R17 del análisis de Operations).
+/// `plataforma/lib/ingesta.ts` y cambiarlo aquí sin cambiarlo allá es la deriva de contrato que ya
+/// pasó una vez (R17 del análisis de Operations).
+///
+/// SIN `shift_id`: la unidad es la jornada (device × día operativo) y cada fila lleva su
+/// `dia_operativo`, calculado en el PC con la hora local del hospital (corte 06:00). Las muestras y
+/// las visitas llevan además el `sap_user` visto: el login del médico, no del paciente.
 ///
 /// El `detail` de un evento pasa por una LISTA BLANCA de claves aquí Y en el servidor: dos vallas
 /// independientes, porque la fuga de PHI a un feed visible en el panel admin es el riesgo R4
@@ -22,15 +26,16 @@ public static class Cable
 
     private const int TopeDeTextoEnDetail = 120;
 
-    public static string Muestra(Guid shiftId, Muestra m) => JsonSerializer.Serialize(new Dictionary<string, object?>
+    public static string Muestra(Muestra m) => JsonSerializer.Serialize(new Dictionary<string, object?>
     {
-        ["shift_id"] = shiftId,
+        ["dia_operativo"] = Dia(m.DiaOperativo),
         ["bucket_start"] = m.BucketStart.UtcDateTime,
         ["bucket_ms"] = m.BucketMs,
         ["seq"] = m.Seq,
         ["app"] = m.App,
         ["surface"] = m.Surface,
         ["encounter_key"] = m.EncounterKey,
+        ["sap_user"] = m.SapUser,
         ["foreground_ms"] = m.ForegroundMs,
         ["active_ms"] = m.ActiveMs,
         ["typing_ms"] = m.TypingMs,
@@ -48,7 +53,9 @@ public static class Cable
         ["guardados"] = m.Guardados,
     });
 
-    public static string Evento(string kind, DateTimeOffset occurredAt, Guid? shiftId, string? encounterKey,
+    /// <param name="occurredAtLocal">La hora LOCAL del hospital (con su offset): de ella sale el día
+    /// operativo del evento. El instante viaja en UTC.</param>
+    public static string Evento(string kind, DateTimeOffset occurredAtLocal, string? encounterKey,
         IReadOnlyDictionary<string, object?>? detail)
     {
         var limpio = new Dictionary<string, object?>();
@@ -69,37 +76,19 @@ public static class Cable
         return JsonSerializer.Serialize(new Dictionary<string, object?>
         {
             ["kind"] = kind,
-            ["occurred_at"] = occurredAt.UtcDateTime,
-            ["shift_id"] = shiftId,
+            ["occurred_at"] = occurredAtLocal.UtcDateTime,
+            ["dia_operativo"] = Dia(Huella.DiaOperativo(occurredAtLocal)),
             ["encounter_key"] = encounterKey,
             ["detail"] = limpio,
         });
     }
 
-    public static string Turno(Turno turno, CierreDeTurno? cierre, string? sapUserSeen, Calidad calidad)
+    public static string Visita(Visita v, string? encounterKey, string? sapUser)
         => JsonSerializer.Serialize(new Dictionary<string, object?>
         {
-            ["shift_id"] = turno.ShiftId,
-            ["doctor_id"] = turno.DoctorId,
-            ["doctor_display"] = turno.DoctorNombre,
-            ["started_at"] = turno.AbiertoEn.UtcDateTime,
-            ["ended_at"] = cierre?.CerradoEn.UtcDateTime,
-            ["end_reason"] = cierre?.Causa,
-            ["dia_operativo"] = turno.DiaOperativo.ToString("yyyy-MM-dd"),
-            ["hmac_version"] = turno.HmacVersion,
-            ["sap_user_seen"] = sapUserSeen,
-            ["huecos_ms"] = calidad.HuecosMs,
-            ["clock_jumps"] = calidad.Saltos,
-            ["spool_dropped"] = calidad.DescartesTotal,
-            ["hooks_degradados"] = calidad.Degradados,
-            ["ticks_sap_saltados_busy"] = calidad.TicksSapSaltados,
-        });
-
-    public static string Visita(Guid shiftId, Visita v, string? encounterKey)
-        => JsonSerializer.Serialize(new Dictionary<string, object?>
-        {
-            ["shift_id"] = shiftId,
+            ["dia_operativo"] = Dia(Huella.DiaOperativo(v.EnteredAt)),
             ["encounter_key"] = encounterKey,
+            ["sap_user"] = sapUser,
             ["sid"] = v.Sid,
             ["tcode"] = v.Tcode,
             ["dynpro"] = v.Dynpro,
@@ -112,12 +101,51 @@ public static class Cable
             ["roundtrips"] = v.Roundtrips,
             ["exit_to"] = v.ExitTo,
         });
+
+    /// <summary>La foto de una jornada desde ESTE proceso (contrato 4). El servidor la guarda por
+    /// (device, día, proceso_id) con GREATEST: mandarla cada 5 min es idempotente y monótono.</summary>
+    public static string Jornada(Jornada j, Calidad calidad, string appVersion, int hmacVersion, Guid procesoId)
+        => JsonSerializer.Serialize(new Dictionary<string, object?>
+        {
+            ["dia_operativo"] = Dia(j.Dia),
+            ["proceso_id"] = procesoId,
+            ["primera_muestra_at"] = j.PrimeraMuestra.UtcDateTime,
+            ["ultima_muestra_at"] = j.UltimaMuestra.UtcDateTime,
+            ["app_version"] = appVersion,
+            ["hmac_version"] = hmacVersion,
+            ["huecos_ms"] = calidad.HuecosMs,
+            ["clock_jumps"] = calidad.Saltos,
+            ["spool_dropped"] = calidad.DescartesTotal,
+            ["hooks_degradados"] = calidad.Degradados,
+            ["hooks_rearmados"] = calidad.HooksRearmados,
+            ["ticks_sap_saltados_busy"] = calidad.TicksSapSaltados,
+            ["sap_scripting"] = calidad.SapScripting,
+            ["sap_eventos_com"] = calidad.SapEventosCom,
+            ["relanzos"] = calidad.Relanzos,
+        });
+
+    /// <summary>El servidor nombra las colecciones SIEMPRE con los nombres del spool del agente
+    /// (`muestras|eventos|visitas|jornadas`); el espejo `rejected[]` de transición todavía usa los
+    /// del cable (`samples|events|sap_visits`). Aquí se traducen los dos; un nombre desconocido es
+    /// null y no borra nada (contrato 2).</summary>
+    public static string? ColeccionDelSpool(string? nombre) => nombre switch
+    {
+        "samples" or "muestras" => "muestras",
+        "events" or "eventos" => "eventos",
+        "sap_visits" or "visitas" => "visitas",
+        "jornadas" => "jornadas",
+        _ => null,
+    };
+
+    private static string Dia(DateOnly d) => d.ToString("yyyy-MM-dd");
 }
 
 /// <summary>
-/// Arma el cuerpo del lote (`POST /api/medidor/lote`) desde lo que el spool entregó. A cada fila se
-/// le inyecta su `spool_seq` — el servidor construye con él el uid de idempotencia
-/// (`device:coleccion:spool_seq`) y lo devuelve en `rejected[]` para envenenar la fila exacta.
+/// Arma el cuerpo del lote (`POST /api/medidor/lote`) desde lo que el spool entregó:
+/// `{device_id, batch_id, client_now, app_version, jornadas[], samples[], events[], sap_visits[]}`.
+/// A cada fila se le inyecta su `spool_seq` PRIMERO — el servidor construye con él el uid de
+/// idempotencia (`device:coleccion:spool_seq`) y lo devuelve en `rechazadas[]`/`no_procesadas[]`
+/// para señalar la fila exacta.
 ///
 /// Con NOMBRE PROPIO, no `seq`: una muestra ya trae `seq` (el segmento dentro de la cubeta), y dos
 /// claves iguales en un objeto JSON son una trampa — el servidor se queda con la última, el uid
@@ -126,18 +154,36 @@ public static class Cable
 /// </summary>
 public static class Lote
 {
-    public static string Serializar(string deviceId, string batchId, DateTimeOffset clientNow, LoteTomado lote)
+    public static string Serializar(string deviceId, string batchId, DateTimeOffset clientNow, string appVersion, LoteTomado lote)
     {
         var sb = new System.Text.StringBuilder(4096);
         sb.Append("{\"device_id\":").Append(JsonSerializer.Serialize(deviceId));
         sb.Append(",\"batch_id\":").Append(JsonSerializer.Serialize(batchId));
         sb.Append(",\"client_now\":").Append(JsonSerializer.Serialize(clientNow.UtcDateTime));
-        Coleccion(sb, "shifts", lote.Turnos);
+        sb.Append(",\"app_version\":").Append(JsonSerializer.Serialize(appVersion));
+        Coleccion(sb, "jornadas", lote.Jornadas);
         Coleccion(sb, "samples", lote.Muestras);
         Coleccion(sb, "events", lote.Eventos);
         Coleccion(sb, "sap_visits", lote.Visitas);
         sb.Append('}');
         return sb.ToString();
+    }
+
+    /// <summary>Lo que se CONFIRMA (se borra del spool) tras un 200 = todo lo enviado − rechazadas
+    /// (veneno: se sacan aparte) − no procesadas (se quedan y se reenvían). No hay campo `kept`
+    /// (contrato 2). Las colecciones vienen ya con los nombres del spool.</summary>
+    public static LoteTomado Confirmables(LoteTomado lote,
+        IEnumerable<(string Coleccion, long Seq)> noProcesadas, IEnumerable<(string Coleccion, long Seq)> veneno)
+    {
+        var fuera = new HashSet<(string, long)>(noProcesadas.Concat(veneno));
+        return new LoteTomado(
+            Filtrar("jornadas", lote.Jornadas),
+            Filtrar("muestras", lote.Muestras),
+            Filtrar("eventos", lote.Eventos),
+            Filtrar("visitas", lote.Visitas));
+
+        IReadOnlyList<FilaDelSpool> Filtrar(string coleccion, IReadOnlyList<FilaDelSpool> filas)
+            => fuera.Count == 0 ? filas : filas.Where(f => !fuera.Contains((coleccion, f.Seq))).ToList();
     }
 
     private static void Coleccion(System.Text.StringBuilder sb, string nombre, IReadOnlyList<FilaDelSpool> filas)

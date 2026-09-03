@@ -83,6 +83,17 @@ internal static class Win32
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
     public static extern IntPtr ShellExecuteW(IntPtr hwnd, string op, string file, string? args, string? dir, int show);
 
+    // ── Supervivencia del proceso ───────────────────────────────────────────
+    // SetErrorMode: sin diálogos del sistema ante un fallo crítico (dejarían al proceso muerto pero
+    // vivo, con el mutex tomado). RegisterApplicationRestart: WER relanza tras un cuelgue o un fallo
+    // nativo (solo si el proceso llevaba ≥ 60 s vivo, así que un bucle de arranque no lo dispara).
+    [DllImport("kernel32.dll")] public static extern uint SetErrorMode(uint mode);
+    public const uint SEM_FAILCRITICALERRORS = 0x0001, SEM_NOGPFAULTERRORBOX = 0x0002, SEM_NOOPENFILEERRORBOX = 0x8000;
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] public static extern int RegisterApplicationRestart(string? commandLine, uint flags);
+    public const uint RESTART_NO_CRASH = 1, RESTART_NO_HANG = 2, RESTART_NO_PATCH = 4, RESTART_NO_REBOOT = 8;
+    /// <summary>La página de códigos OEM de la consola: en la que escribe schtasks.exe cuando se redirige.</summary>
+    [DllImport("kernel32.dll")] public static extern uint GetOEMCP();
+
     // ── Bandeja ─────────────────────────────────────────────────────────────
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     public struct NOTIFYICONDATAW

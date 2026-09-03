@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.Versioning;
 using System.Text.Json;
 
@@ -7,6 +8,12 @@ namespace Medidor.App;
 /// LA RAÍZ DE COMPOSICIÓN del medidor. Arma las piezas, las cablea y las mueve con dos relojes de
 /// la ventana oculta: el latido de medición (1 s) y el latido de subida (1 min). Mutex de
 /// instancia única: dos medidores sobre el mismo PC contarían doble.
+///
+/// NUNCA SE APAGA. Cuatro capas de supervivencia, de la más rápida a la más lenta: el manejador de
+/// colapsos que vuelca lo medido y relanza (segundos) → RegisterApplicationRestart (WER, para
+/// cuelgues y fallos nativos) → la tarea programada «Medidor-Vigilante» cada 5 min → la clave Run
+/// al iniciar sesión. Y GRABA SIEMPRE: la unidad es la jornada (consultorio × día operativo, corte
+/// 06:00), no el turno de un médico; bloqueado se graba como «bloqueado».
 ///
 /// Todo el estado con contenido (título SAP, id de paciente crudo) vive dentro de un tick y muere
 /// ahí; lo que cruza a las cubetas y al spool ya pasó por la aduana del Normalizador y de Cable.
@@ -18,36 +25,100 @@ namespace Medidor.App;
 [SupportedOSPlatform("windows")]
 public sealed class Programa
 {
+    private static Programa? _instancia;
+    private static bool _vigilanteOk;
+
+    /// <summary>Un GUID por arranque del .exe. Viaja en cada foto de la jornada: el servidor guarda
+    /// una fila por (device, día, proceso) y SUMA los contadores entre procesos (contrato 1). Por
+    /// eso los contadores de calidad viven en memoria y arrancan en cero: restaurarlos duplicaría.</summary>
+    public static Guid ProcesoId { get; private set; }
+
     [STAThread]
-    public static int Main()
+    public static int Main(string[] args)
     {
+        // Antes que nada: que ningún fallo termine en un diálogo de Windows que deje al proceso muerto
+        // pero vivo (con el mutex tomado y sin medir). El colapso se anota, se vuelca y se relanza.
+        AppDomain.CurrentDomain.UnhandledException += Colapso;
+        TaskScheduler.UnobservedTaskException += (_, e) => { Registro.Excepcion("tarea", e.Exception); e.SetObserved(); };
+        Win32.SetErrorMode(Win32.SEM_FAILCRITICALERRORS | Win32.SEM_NOGPFAULTERRORBOX | Win32.SEM_NOOPENFILEERRORBOX);
+
         // DOS PAPELES EN UN SOLO ARCHIVO. Si este .exe se abrió desde cualquier sitio que no sea
         // su carpeta de instalación —la carpeta de Descargas, el escritorio, una USB— hace de
-        // INSTALADOR: se copia a su sitio, se registra para arrancar con Windows, lanza a la copia
-        // y se va. Si ya está en su carpeta, hace de MEDIDOR y se pone a medir.
+        // INSTALADOR: se copia a su sitio, se registra para arrancar con Windows y como tarea
+        // vigilante, lanza a la copia y se va. Si ya está en su carpeta, hace de MEDIDOR.
         //
         // Nace de tres intentos fallidos en el piloto del HGM (2026-09-02): un .exe que exige
         // correr un .ps1 al lado se instala mal, porque el gesto natural sobre un .exe es el doble
-        // clic. Un instrumento que hay que desplegar en seis PCs de un hospital tiene que caber en
-        // un archivo y un doble clic. instalar.ps1 sigue existiendo y sigue funcionando.
-        if (Instalador.HayQueInstalar()) return Instalador.InstalarYSalir();
+        // clic. instalar.ps1 sigue existiendo y sigue funcionando.
+        var modo = Arranque.Desde(args);
+        if (modo is Arranque.Normal && Instalador.HayQueInstalar()) return Instalador.InstalarYSalir();
 
-        using var mutex = new Mutex(true, "Local\\Medidor-instancia-unica", out bool primera);
-        if (!primera) return 0; // ya hay un medidor corriendo en esta sesión
+        // Sin propiedad inicial: el relanzado tras un colapso debe ESPERAR a que el padre suelte el mutex.
+        using var mutex = new Mutex(false, "Local\\Medidor-instancia-unica");
+        if (!Vigilante.TomarInstancia(mutex, modo)) return 0; // ya hay un medidor midiendo en esta sesión
 
-        Registro.Anota("medidor", $"arrancando v{VersionApp()} en {Environment.MachineName}");
+        Vigilante.Latir();
+        ProcesoId = Guid.NewGuid();
+        Registro.Anota("medidor", $"arrancando v{VersionApp()} pid={Environment.ProcessId} proceso={ProcesoId} modo={modo} en {Environment.MachineName}");
         Registro.Podar(30);
-        Instalador.AsegurarArranqueConWindows();
-        try { return new Programa().Correr(); }
+
+        // La tarea programada puede lanzar en BelowNormal; los ganchos de bajo nivel quieren Normal.
+        try { Process.GetCurrentProcess().PriorityClass = ProcessPriorityClass.Normal; } catch { }
+        // Tercera capa (WER): tras un cuelgue o un fallo nativo, Windows relanza con --relanzado.
+        Win32.RegisterApplicationRestart("--relanzado", Win32.RESTART_NO_PATCH | Win32.RESTART_NO_REBOOT);
+
+        if (!Instalador.SinInstalar)
+        {
+            Instalador.AsegurarArranqueConWindows();
+            _vigilanteOk = Instalador.AsegurarVigilante();
+        }
+
+        try
+        {
+            _instancia = new Programa(modo);
+            return _instancia.Correr();
+        }
         catch (Exception e)
         {
             Registro.Excepcion("fatal", e);
-            Win32.MessageBoxW(IntPtr.Zero,
-                "El medidor no pudo arrancar.\n\nRevisa el log en %LOCALAPPDATA%\\Medidor\\logs.\n\n" + e.Message,
-                "Medidor", Win32.MB_OK | Win32.MB_ICONERROR | Win32.MB_TOPMOST);
+            if (modo is Arranque.Normal) // sin modal si nadie mira: el vigilante y el relanzo no tienen a quién avisar
+                Win32.MessageBoxW(IntPtr.Zero,
+                    "El medidor no pudo arrancar.\n\nRevisa el log en %LOCALAPPDATA%\\Medidor\\logs.\n\n" + e.Message,
+                    "Medidor", Win32.MB_OK | Win32.MB_ICONERROR | Win32.MB_TOPMOST);
             return 1;
         }
     }
+
+    /// <summary>Una excepción que nadie atrapó, en cualquier hilo. Se anota la cadena entera, se
+    /// vuelca lo medido (≤ 3 s), y se relanza —con guardia: 5 en 10 min, el sexto se lo deja al
+    /// vigilante—. Environment.Exit(70) evita el diálogo de WER, que dejaría vivo al proceso muerto
+    /// con el mutex tomado.</summary>
+    private static void Colapso(object sender, UnhandledExceptionEventArgs e)
+    {
+        try
+        {
+            if (e.ExceptionObject is Exception ex) Registro.Excepcion("fatal", ex);
+            else Registro.Anota("fatal", $"colapso: {e.ExceptionObject}");
+
+            try { Task.Run(() => _instancia?.VolcarAntesDeMorir("colapso")).Wait(3000); }
+            catch (Exception x) { Registro.Excepcion("fatal", x); }
+
+            var (relanzar, historial) = GuardiaDeRelanzos.Evaluar(Vigilante.LeerRelanzos(), DateTimeOffset.Now);
+            Vigilante.GuardarRelanzos(historial);
+            if (relanzar && Environment.ProcessPath is string exe)
+            {
+                Process.Start(new ProcessStartInfo(exe, $"--relanzado={Environment.ProcessId}")
+                { UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(exe) ?? "" });
+                Registro.Anota("fatal", $"relanzado ({historial.Count} en {GuardiaDeRelanzos.VentanaMinutos} min)");
+            }
+            else
+                Registro.Anota("fatal", $"{GuardiaDeRelanzos.Maximo} colapsos en {GuardiaDeRelanzos.VentanaMinutos} min: no se relanza; el vigilante reintenta en ≤ 5 min");
+        }
+        catch { /* ya no queda nada que hacer salvo salir */ }
+        finally { Environment.Exit(70); }
+    }
+
+    private readonly Arranque _modo;
 
     private Ajustes _ajustes = null!;
     private ClienteServidor _cliente = null!;
@@ -57,24 +128,34 @@ public sealed class Programa
 
     private Identidad? _identidad;
     private ConfigDeMedicion _config = ConfigDeMedicion.PorDefecto();
-    private IReadOnlyList<MedicoDelRoster> _roster = Array.Empty<MedicoDelRoster>();
     private byte[]? _secreto;
     private volatile bool _conectado;
+    private readonly object _candadoEstado = new();
 
     private SondaPrimerPlano _sonda = null!;
     private Ganchos _ganchos = null!;
     private HiloSap _sap = null!;
-    private Sesionizador _sesion = null!;
     private Cubetas _cubetas = null!;
     private Calidad _calidad = new();
     private Viaje _viaje = null!;
     private Orquestador _orquestador = null!;
     private Subidor _subidor = null!;
 
-    private Turno? _turnoActual;
-    private bool _bloqueado;
+    private readonly Jornadas _jornadas = new();
+    private long _tick;
+    private long _ultimoTickMono;
+    private DateOnly? _diaDeLaClave;
+    private byte[]? _claveDelDiaCache;
+    private long _proximoIntentoDeSpoolMono;
+    private bool _volcado;
     private bool _apagando;
     private (Bandeja.EstadoUi, string?) _ultimoEstadoPintado = ((Bandeja.EstadoUi)(-1), null);
+
+#if DEBUG
+    private long _soltarGanchosEnTick = -1, _colapsarEnTick = -1;
+#endif
+
+    private Programa(Arranque modo) => _modo = modo;
 
     private int Correr()
     {
@@ -86,19 +167,26 @@ public sealed class Programa
             // sin -p:MedidorClavePorDefecto, donde a propósito no hay ninguna credencial. El
             // mensaje da las DOS salidas — decir solo «falta configuración» manda a la persona a
             // buscar un archivo que no sabe crear (pasó tres veces en el piloto del HGM).
-            Win32.MessageBoxW(IntPtr.Zero,
-                "A esta copia del medidor le falta la clave del servidor.\n\n"
-                + "Pasa cuando el programa se compila desde el código en vez de descargarse ya listo.\n\n"
-                + "Dos formas de arreglarlo:\n"
-                + "   1. Descarga el Medidor.exe oficial, que ya trae la clave dentro.\n"
-                + "   2. O corre instalar.ps1 pasándole el servidor y la clave.\n\n"
-                + $"Servidor: {_ajustes.Servidor ?? "(ninguno)"}\n"
-                + $"Configuración: {Rutas.ArchivoDeAjustes}",
-                "Medidor — falta la clave", Win32.MB_OK | Win32.MB_ICONERROR | Win32.MB_TOPMOST);
+            Registro.Anota("medidor", "falta la clave del servidor: no se mide");
+            if (_modo is Arranque.Normal)
+                Win32.MessageBoxW(IntPtr.Zero,
+                    "A esta copia del medidor le falta la clave del servidor.\n\n"
+                    + "Pasa cuando el programa se compila desde el código en vez de descargarse ya listo.\n\n"
+                    + "Dos formas de arreglarlo:\n"
+                    + "   1. Descarga el Medidor.exe oficial, que ya trae la clave dentro.\n"
+                    + "   2. O corre instalar.ps1 pasándole el servidor y la clave.\n\n"
+                    + $"Servidor: {_ajustes.Servidor ?? "(ninguno)"}\n"
+                    + $"Configuración: {Rutas.ArchivoDeAjustes}",
+                    "Medidor — falta la clave", Win32.MB_OK | Win32.MB_ICONERROR | Win32.MB_TOPMOST);
             return 2;
         }
         _cliente = new ClienteServidor(_ajustes.Servidor!, _ajustes.Clave!, VersionApp());
-        _spool = new SpoolCompartido(new SpoolSqlite(Rutas.ArchivoDelSpool));
+
+        // Un spool corrupto no tumba el arranque: se aparta con fecha y se recrea (promesa 27).
+        var sqlite = new SpoolSqlite(Rutas.ArchivoDelSpool);
+        _spool = new SpoolCompartido(sqlite);
+        if (sqlite.ArchivoCorrupto != null) Registro.Anota("spool", $"corrupto al abrir: apartado como {Path.GetFileName(sqlite.ArchivoCorrupto)} y recreado vacío");
+        if (sqlite.FilasV1Purgadas > 0) Registro.Anota("spool", $"formato 1 → 2: {sqlite.FilasV1Purgadas} filas viejas purgadas (llevaban shift_id)");
 
         CargarEstado();
         RegistrarAlArrancar(); // bloquea hasta 20 s, ANTES de los ganchos y de la ventana
@@ -113,39 +201,54 @@ public sealed class Programa
         _sap = new HiloSap(p => _config.EsProcesoSap(p), () => _config.SapIdentityMs);
         _sap.Arrancar();
 
-        _sesion = new Sesionizador();
         _cubetas = new Cubetas();
         _viaje = new Viaje();
         _orquestador = new Orquestador(
-            _sonda, _ganchos, _sap, _sesion, _cubetas, () => _calidad, _viaje,
-            () => _config, ClaveDelDiaDelTurno, EmitirEvento, EmitirVisita);
-        _orquestador.SapUserCambio += AsignarPorUsuarioSap;
+            _sonda, _ganchos, _sap, _cubetas, () => _calidad, _viaje,
+            () => _config, ClaveDelDia, EmitirEvento, EmitirVisita);
 
-        _subidor = new Subidor(_spool, _cliente, () => _identidad?.DeviceId, () => _calidad);
+        _subidor = new Subidor(_spool, _cliente, () => _identidad?.DeviceId, () => _calidad, VersionApp);
         _subidor.ConfigVersionNueva += cv => { if (cv > _config.Version) _ = RefrescarConfigAsync(); };
         _subidor.DevicePausado += () => _bandeja.Aviso("Medidor pausado", "Este equipo fue pausado desde el panel.", advertencia: true);
         _subidor.Conectado += ok => _conectado = ok;
+        _subidor.ConsultorioRecibido += AplicarConsultorio;
 
         _ventana.Latido += Latido;
         _ventana.Subida += () => { if (_identidad == null) _ = RegistrarAsync(); _subidor.Latir(); };
         _ventana.MenuPedido += Menu;
         _ventana.Bloqueo += AlBloquear;
-        _ventana.Suspende += () => EmitirEvento("suspend", DateTimeOffset.UtcNow, _sesion.Abierto?.ShiftId, null, null);
-        _ventana.Reanuda += () => EmitirEvento("resume", DateTimeOffset.UtcNow, _sesion.Abierto?.ShiftId, null, null);
+        _ventana.Suspende += () => EmitirEvento("suspend", DateTimeOffset.Now, null, null);
+        _ventana.Reanuda += () => { EmitirEvento("resume", DateTimeOffset.Now, null, null); Vigilante.Latir(); }; // que el vigilante no nos dé por muertos al despertar
         _ventana.BarraRecreada += () => _bandeja.Mostrar();
         _ventana.Apagando += Apagar;
 
-        // Abrir el turno del arranque (anónimo si nadie eligió). El baseline no se pierde por eso.
-        AbrirTurno(null, null);
-        EmitirEvento("medidor_start", DateTimeOffset.UtcNow, _sesion.Abierto?.ShiftId, null,
-            new Dictionary<string, object?> { ["version"] = VersionApp() });
+        // La jornada del arranque. Lo que el spool tuvo que hacer al abrir se dice con eventos: el
+        // panel tiene que poder explicar un hueco o un reinicio de cola sin abrir el log del PC.
+        var pared = DateTimeOffset.Now;
+        if (_modo is Arranque.Relanzado) _calidad.Relanzo();
+        _jornadas.Avanzar(pared);
+        if (sqlite.ArchivoCorrupto != null)
+            EmitirEvento("spool_reset", pared, null, new Dictionary<string, object?> { ["reason"] = "corrupto_arranque" });
+        if (sqlite.FilasV1Purgadas > 0)
+            EmitirEvento("spool_drop", pared, null, new Dictionary<string, object?> { ["reason"] = "formato_v1", ["count"] = sqlite.FilasV1Purgadas });
+        EmitirEvento("medidor_start", pared, null, new Dictionary<string, object?> { ["version"] = VersionApp(), ["reason"] = _modo.Motivo });
+        EmitirEvento("jornada_inicio", pared, null, null);
+        EmitirJornada(_jornadas.Actual!, _calidad);
+
+#if DEBUG
+        // Solo en Debug: provocar un colapso o soltar los ganchos para ver el relanzo y el rearme en vivo.
+        if (Environment.GetEnvironmentVariable("MEDIDOR_PROBAR_COLAPSO") == "1") _colapsarEnTick = 20;
+        if (Environment.GetEnvironmentVariable("MEDIDOR_PROBAR_GANCHOS") == "1") _soltarGanchosEnTick = 20;
+#endif
 
         _ventana.ArmarRelojes(1000, 60_000);
         PintarEstado();
-        _bandeja.Aviso("Medidor activo", _roster.Count > 0
-            ? "Elige tu nombre desde el icono al empezar tu turno."
-            : "Midiendo. Los nombres de los médicos se configuran en el panel web.");
-        Registro.Anota("medidor", $"midiendo · registrado={_identidad != null} · roster={_roster.Count} · ganchos={(_ganchos.Degradado ? "degradados" : "ok")}");
+        if (_modo is Arranque.Normal)
+            _bandeja.Aviso("Medidor activo", string.IsNullOrWhiteSpace(_identidad?.ConsultorioNombre)
+                ? "Midiendo. El consultorio de este PC se asigna desde el panel (Dispositivos)."
+                : $"Midiendo {_identidad!.ConsultorioNombre}.");
+        Registro.Anota("medidor", $"midiendo · registrado={_identidad != null} · consultorio={_identidad?.ConsultorioNombre ?? "sin asignar"}"
+            + $" · ganchos={(_ganchos.Degradado ? "degradados" : "ok")} · vigilante={SiNo(_vigilanteOk)}");
 
         _ventana.Correr(); // bloquea hasta WM_QUIT
         Apagar();
@@ -158,178 +261,163 @@ public sealed class Programa
     {
         try
         {
-            var cierre = _orquestador.Tick();
-            if (cierre != null) CerrarTurno(cierre);
+            var pared = DateTimeOffset.Now;
+            _tick++;
 
-            // Sin turno abierto (se cerró por inactividad o a mano) y alguien vuelve a usar el PC:
-            // abre uno anónimo. Solo con input reciente, para no encadenar turnos vacíos de 4 h.
-            if (_sesion.Abierto == null && !_orquestador.Pausado && !_bloqueado
-                && _orquestador.UltimoInputHaceMs < Actividad.UmbralInactividadMs)
-                AbrirTurno(null, null);
+            // Un hueco de más de un minuto entre ticks es una suspensión (o un cuelgue largo): se
+            // renueva el latido ya, antes de que la tarea vigilante —que también despierta— lo lea viejo.
+            var ahoraMono = Environment.TickCount64;
+            if (_ultimoTickMono != 0 && ahoraMono - _ultimoTickMono > 60_000) Vigilante.Latir();
+            _ultimoTickMono = ahoraMono;
 
-            if (_sesion.Abierto != null) CosecharYEncolar(_sesion.Abierto.ShiftId, cerrarTodo: false);
+            // A las 06:00 la jornada cambia sola: se cosecha TODO (las cubetas de ayer ya no reciben
+            // nada), se emite la última foto de la cerrada, y la nueva arranca con calidad en cero.
+            var cerrada = _jornadas.Avanzar(pared);
+            if (cerrada != null)
+            {
+                CosecharYEncolar(todo: true);
+                EmitirJornada(cerrada, _calidad);
+                EmitirEvento("jornada_fin", cerrada.UltimaMuestra, null, null);
+                _orquestador.OlvidarEncounter(pared, "dia_nuevo");
+                _calidad = new Calidad();
+                _orquestador.NuevaJornada();
+                EmitirEvento("jornada_inicio", pared, null, null);
+                Registro.Anota("jornada", $"{cerrada.Dia:yyyy-MM-dd} cerrada → {_jornadas.Actual!.Dia:yyyy-MM-dd} abierta");
+            }
+
+#if DEBUG
+            if (_tick == _soltarGanchosEnTick) { _ganchos.Desenganchar(); Registro.Anota("ganchos", "PRUEBA: ganchos soltados (MEDIDOR_PROBAR_GANCHOS)"); }
+            if (_tick == _colapsarEnTick) new Thread(() => throw new InvalidOperationException("colapso de prueba (MEDIDOR_PROBAR_COLAPSO)")).Start();
+#endif
+
+            _orquestador.Tick(pared);
+
+            // Solo cubetas COMPLETAS cada 15 s (contrato 6): la clave única del servidor es
+            // (device, bucket_start, seq) y una cubeta a medias chocaría con su versión completa.
+            if (_tick % 15 == 0) CosecharYEncolar(todo: false);
+
+            if (_tick % 300 == 0)
+            {
+                EmitirJornada(_jornadas.Actual!, _calidad);
+                Heartbeat(pared);
+                Vigilante.Latir();
+                if (!_bandeja.Visible) _bandeja.Mostrar();
+            }
+
+            if (_spool.Corrupto && Environment.TickCount64 >= _proximoIntentoDeSpoolMono)
+            {
+                _proximoIntentoDeSpoolMono = Environment.TickCount64 + 60_000;
+                var movido = _spool.Reabrir();
+                Registro.Anota("spool", $"corrupto en marcha: apartado como {Path.GetFileName(movido)} y recreado vacío");
+                EmitirEvento("spool_reset", pared, null, new Dictionary<string, object?> { ["reason"] = "corrupto_en_marcha" });
+            }
+
             PintarEstado();
         }
         catch (Exception e) { Registro.Excepcion("tick", e); }
     }
 
+    /// <summary>Solo el estado y el evento. SIN cosechar (contrato 6): la cubeta en curso se
+    /// completa sola como «bloqueado» y sale con las demás.</summary>
     private void AlBloquear(bool bloqueado)
     {
-        _bloqueado = bloqueado;
         _orquestador.Bloqueado(bloqueado);
-        EmitirEvento(bloqueado ? "lock" : "unlock", DateTimeOffset.UtcNow, _sesion.Abierto?.ShiftId, null, null);
-        if (bloqueado && _sesion.Abierto != null) CosecharYEncolar(_sesion.Abierto.ShiftId, cerrarTodo: true);
+        EmitirEvento(bloqueado ? "lock" : "unlock", DateTimeOffset.Now, null, null);
         PintarEstado();
     }
 
-    private string? MedicoActual => _sesion?.Abierto?.DoctorNombre;
-
     private void PintarEstado()
     {
-        var estado = _orquestador.Pausado ? Bandeja.EstadoUi.Pausado
-            : _identidad == null && !_conectado ? Bandeja.EstadoUi.Desconectado
-            : MedicoActual == null ? Bandeja.EstadoUi.SinMedico
+        var consultorio = _identidad?.ConsultorioNombre;
+        var estado = !_conectado ? Bandeja.EstadoUi.Desconectado
+            : string.IsNullOrWhiteSpace(consultorio) ? Bandeja.EstadoUi.SinConsultorio
             : Bandeja.EstadoUi.Midiendo;
-        var clave = (estado, MedicoActual);
+        var clave = (estado, consultorio);
         if (clave == _ultimoEstadoPintado) return;
         _ultimoEstadoPintado = clave;
-        _bandeja.MostrarEstado(estado, MedicoActual);
+        _bandeja.MostrarEstado(estado, consultorio);
     }
+
+    /// <summary>La línea de latido del log, cada 5 min: lo que hace falta para diagnosticar un PC
+    /// callado sin conectarse a él (A3). Solo etiquetas y conteos.</summary>
+    private void Heartbeat(DateTimeOffset pared)
+    {
+        var ultimaSubida = _subidor.UltimaSubidaOk is DateTimeOffset u ? $"{(pared - u).TotalMinutes:F0}min" : "nunca";
+        Registro.Anota("medidor",
+            $"vivo · dia={_jornadas.Actual?.Dia:yyyy-MM-dd} · consultorio={_identidad?.ConsultorioNombre ?? "sin asignar"} · ticks={_tick}"
+            + $" · bloqueado={SiNo(_orquestador.EstaBloqueado)} · ganchos={(_ganchos.Degradado ? "degradados" : "ok")}(rearmados {_ganchos.Rearmados})"
+            + $" · sap=motor:{SiNo(_sap.Enganchado)} eventos:{SiNo(_sap.EventosEnganchados)}"
+            + $" · spool={_spool.BytesAproximados / 1024}KB/{_spool.Filas}filas · ultima_subida_hace={ultimaSubida}"
+            + $" · huecos_ms={_calidad.HuecosMs} · vigilante={SiNo(_vigilanteOk)}");
+    }
+
+    private static string SiNo(bool b) => b ? "si" : "no";
 
     // ── El menú ──────────────────────────────────────────────────────────────
 
     private void Menu()
     {
-        var accion = _bandeja.Menu(_roster, _sesion.Abierto?.DoctorId, _orquestador.Pausado, _sesion.Abierto?.DoctorId != null);
-        switch (accion)
+        switch (_bandeja.Menu())
         {
-            case AccionDeMenu.ElegirMedico m:
-                ElegirMedico(m.Medico, "menu");
-                break;
-            case AccionDeMenu.CerrarTurno:
-                var c = _sesion.Cerrar(DateTimeOffset.Now, "manual");
-                if (c != null) CerrarTurno(c);
-                _bandeja.Aviso("Turno cerrado", "Gracias. El siguiente médico elige su nombre desde el icono.");
-                break;
-            case AccionDeMenu.Pausar:
-                _orquestador.Pausar();
-                if (_sesion.Abierto != null) CosecharYEncolar(_sesion.Abierto.ShiftId, cerrarTodo: true);
-                break;
-            case AccionDeMenu.Reanudar:
-                _orquestador.Reanudar();
-                break;
             case AccionDeMenu.QueSeMide:
-                Bandeja.QueSeMide(_ventana.Hwnd);
+                Bandeja.QueSeMide(_ventana.Hwnd, _identidad?.ConsultorioNombre);
                 break;
             case AccionDeMenu.VerPanel:
                 Win32.ShellExecuteW(IntPtr.Zero, "open", _ajustes.Servidor!, null, null, 1);
                 break;
-            case AccionDeMenu.Salir:
-                if (Win32.MessageBoxW(_ventana.Hwnd, "¿Cerrar el medidor? Dejará de medir hasta que se vuelva a abrir.",
-                        "Medidor", Win32.MB_YESNO | Win32.MB_ICONQUESTION | Win32.MB_TOPMOST) == Win32.IDYES)
-                    _ventana.Cerrar();
-                break;
         }
         PintarEstado();
     }
 
-    private void ElegirMedico(MedicoDelRoster medico, string motivo)
-    {
-        if (_sesion.Abierto != null && _sesion.Abierto.DoctorId == medico.Id) return;
+    // ── Jornada, cubetas y eventos ───────────────────────────────────────────
 
-        // Turno abierto sin médico: se reasigna. Con otro médico: es un cambio de turno (cierra el
-        // anterior y abre uno nuevo — dos médicos son dos turnos).
-        if (_sesion.Abierto != null && _sesion.Abierto.DoctorId == null)
+    /// <summary>La clave de la huella se deriva POR TICK del día operativo de <paramref name="pared"/>
+    /// (cacheada por día): a las 06:00 rota sola, sin input ni turno (promesa 30).</summary>
+    private byte[]? ClaveDelDia(DateTimeOffset pared)
+    {
+        if (_secreto == null) return null;
+        var dia = Huella.DiaOperativo(pared);
+        if (_diaDeLaClave != dia)
         {
-            _sesion.Reasignar(medico.Id, medico.Nombre);
-            _turnoActual = _sesion.Abierto;
-            EmitirEvento("doctor_prompted", DateTimeOffset.UtcNow, _sesion.Abierto!.ShiftId, null,
-                new Dictionary<string, object?> { ["reason"] = motivo });
-            _spool.Encolar("turnos", Cable.Turno(_turnoActual!, null, _orquestador.SapUserVisto, _calidad));
+            _claveDelDiaCache = Huella.ClaveDelDia(_secreto, dia);
+            _diaDeLaClave = dia;
         }
-        else
-        {
-            AbrirTurno(medico.Id, medico.Nombre);
-        }
-        _bandeja.Aviso("Turno de " + medico.Nombre, motivo == "usuario_sap"
-            ? "Asignado por tu usuario de SAP. Si no eres tú, elige tu nombre desde el icono."
-            : "Midiendo tu turno. Puedes pausar desde el icono.");
-        PintarEstado();
+        return _claveDelDiaCache;
     }
 
-    /// <summary>El usuario SAP (login del médico, no del paciente) asigna el turno solo si está en
-    /// el roster. Así el selector deja de depender de que alguien se acuerde.</summary>
-    private void AsignarPorUsuarioSap(string usuario)
+    private void CosecharYEncolar(bool todo)
     {
-        var m = _roster.FirstOrDefault(r => r.UsuariosSap.Any(u => string.Equals(u, usuario, StringComparison.OrdinalIgnoreCase)));
-        if (m == null) return;
-        ElegirMedico(m, "usuario_sap");
+        if (_cubetas == null || _spool == null) return;
+        var muestras = todo ? _cubetas.CosecharTodo() : _cubetas.Cosechar(DateTimeOffset.Now);
+        foreach (var m in muestras) _spool.Encolar("muestras", Cable.Muestra(m));
     }
 
-    // ── Turnos ───────────────────────────────────────────────────────────────
-
-    private void AbrirTurno(string? doctorId, string? doctorNombre)
+    /// <summary>La foto de la jornada desde este proceso. Se encola la nueva y se compactan las
+    /// anteriores no enviadas del mismo proceso y día: sin red, `jornadas` se queda en ≤ 1 fila
+    /// pendiente por proceso en vez de crecer una por cada 5 min.</summary>
+    private void EmitirJornada(Jornada jornada, Calidad calidad)
     {
-        var anterior = _turnoActual;
-        var (nuevo, cierreDelAnterior) = _sesion.Abrir(DateTimeOffset.Now, doctorId, doctorNombre, _identidad?.HmacVersion ?? 1);
-        if (cierreDelAnterior != null && anterior != null) CerrarTurnoInterno(anterior, cierreDelAnterior);
-
-        _turnoActual = nuevo;
-        _calidad = new Calidad(); // la calidad es POR TURNO: un descarte de ayer no invalida el de hoy
-        EmitirEvento("shift_start", nuevo.AbiertoEn, nuevo.ShiftId, null, null);
-        _spool.Encolar("turnos", Cable.Turno(nuevo, null, null, _calidad));
-        Registro.Anota("turno", $"abierto {nuevo.ShiftId} · médico={(doctorNombre == null ? "sin médico" : "sí")}");
+        _spool.Encolar("jornadas", Cable.Jornada(jornada, calidad, VersionApp(), _identidad?.HmacVersion ?? 1, ProcesoId));
+        _spool.Compactar("jornadas", jornada.Dia, ProcesoId);
     }
 
-    /// <summary>Cierre que vino del sesionizador (inactividad, bloqueo) o del menú: el turno ya no
-    /// está abierto, así que se usa el último conocido.</summary>
-    private void CerrarTurno(CierreDeTurno cierre)
-    {
-        if (_turnoActual == null || _turnoActual.ShiftId != cierre.ShiftId) return;
-        CerrarTurnoInterno(_turnoActual, cierre);
-        _turnoActual = null;
-    }
+    private void EmitirEvento(string kind, DateTimeOffset cuandoLocal, string? encounter, IReadOnlyDictionary<string, object?>? detail)
+        => _spool.Encolar("eventos", Cable.Evento(kind, cuandoLocal, encounter, detail));
 
-    private void CerrarTurnoInterno(Turno turno, CierreDeTurno cierre)
-    {
-        var visita = _orquestador.OlvidarContexto(DateTimeOffset.Now);
-        if (visita != null) EmitirVisita(turno.ShiftId, visita, null);
-        CosecharYEncolar(turno.ShiftId, cerrarTodo: true);
-        EmitirEvento("shift_end", cierre.CerradoEn, cierre.ShiftId, null,
-            new Dictionary<string, object?> { ["reason"] = cierre.Causa });
-        _spool.Encolar("turnos", Cable.Turno(turno, cierre, _orquestador.SapUserVisto, _calidad));
-        Registro.Anota("turno", $"cerrado {cierre.ShiftId} · causa={cierre.Causa}");
-    }
+    private void EmitirVisita(Visita v, string? encounter, string? sapUser)
+        => _spool.Encolar("visitas", Cable.Visita(v, encounter, sapUser));
 
-    private byte[]? ClaveDelDiaDelTurno()
-    {
-        if (_secreto == null || _sesion.Abierto == null) return null;
-        return Huella.ClaveDelDia(_secreto, _sesion.Abierto.DiaOperativo);
-    }
-
-    private void CosecharYEncolar(Guid shift, bool cerrarTodo)
-    {
-        var muestras = cerrarTodo ? _cubetas.CosecharTodo() : _cubetas.Cosechar(DateTimeOffset.Now);
-        foreach (var m in muestras) _spool.Encolar("muestras", Cable.Muestra(shift, m));
-    }
-
-    private void EmitirEvento(string kind, DateTimeOffset cuando, Guid? shift, string? encounter, IReadOnlyDictionary<string, object?>? detail)
-        => _spool.Encolar("eventos", Cable.Evento(kind, cuando, shift, encounter, detail));
-
-    private void EmitirVisita(Guid shift, Visita v, string? encounter)
-        => _spool.Encolar("visitas", Cable.Visita(shift, v, encounter));
-
-    // ── Identidad y config ───────────────────────────────────────────────────
+    // ── Identidad, config y consultorio ──────────────────────────────────────
 
     private void CargarEstado()
     {
         try
         {
             if (!File.Exists(Rutas.ArchivoDeEstado)) return;
+            // Los estado.json de la v1 traen «Roster»: se ignora sin protestar.
             var doc = JsonSerializer.Deserialize<EstadoEnDisco>(File.ReadAllText(Rutas.ArchivoDeEstado));
             if (doc?.Identidad != null && !string.IsNullOrWhiteSpace(doc.Identidad.DeviceId)) _identidad = doc.Identidad;
             if (doc?.Config != null) _config = doc.Config;
-            if (doc?.Roster != null) _roster = doc.Roster;
         }
         catch (Exception e) { Registro.Excepcion("estado", e); }
     }
@@ -341,7 +429,7 @@ public sealed class Programa
     }
 
     /// <summary>Se registra (o se vuelve a presentar) ante el servidor: devuelve identidad, secreto,
-    /// config y roster. Si no hay red, se sigue con lo guardado y se reintenta cada minuto.</summary>
+    /// config y consultorio. Si no hay red, se sigue con lo guardado y se reintenta cada minuto.</summary>
     private async Task RegistrarAsync()
     {
         try
@@ -384,6 +472,7 @@ public sealed class Programa
                 {
                     Secreto.Guardar(Convert.FromBase64String(sec.GetString() ?? ""));
                     _secreto = Secreto.Cargar();
+                    _diaDeLaClave = null; // secreto nuevo: la clave del día se vuelve a derivar
                 }
                 catch (Exception e) { Registro.Excepcion("secreto", e); }
             }
@@ -397,36 +486,44 @@ public sealed class Programa
                 _config = nueva;
             }
         }
-        if (raiz.TryGetProperty("roster", out var r) && r.ValueKind == JsonValueKind.Array)
+        // Consultorio: ausente → conservar; null → limpiar; objeto → asignar. El roster ya no se lee:
+        // el médico dejó de ser la unidad (queda el usuario SAP por cubeta como anotación).
+        if (raiz.TryGetProperty("consultorio", out var c))
         {
-            var lista = new List<MedicoDelRoster>();
-            foreach (var m in r.EnumerateArray())
-            {
-                var usuarios = new List<string>();
-                if (m.TryGetProperty("sap_users", out var su) && su.ValueKind == JsonValueKind.Array)
-                    foreach (var u in su.EnumerateArray()) if (u.ValueKind == JsonValueKind.String) usuarios.Add(u.GetString() ?? "");
-                lista.Add(new MedicoDelRoster(
-                    m.GetProperty("id").GetString() ?? "",
-                    m.GetProperty("display_name").GetString() ?? "",
-                    usuarios));
-            }
-            _roster = lista;
+            if (c.ValueKind == JsonValueKind.Null) { id.ConsultorioId = null; id.ConsultorioNombre = null; }
+            else if (ClienteServidor.LeerConsultorio(c) is ConsultorioDelServidor leido) { id.ConsultorioId = leido.Id; id.ConsultorioNombre = leido.Nombre; }
         }
         if (string.IsNullOrWhiteSpace(id.DeviceId)) return;
         _identidad = id;
         GuardarEstado();
-        Registro.Anota(esRegistro ? "registro" : "config", $"ok · config v{_config.Version} · roster {_roster.Count} · hmac v{id.HmacVersion}");
-        if (_sesion != null)
-            EmitirEvento("config_applied", DateTimeOffset.UtcNow, _sesion.Abierto?.ShiftId, null,
-                new Dictionary<string, object?> { ["version"] = _config.Version });
+        Registro.Anota(esRegistro ? "registro" : "config", $"ok · config v{_config.Version} · consultorio={id.ConsultorioNombre ?? "sin asignar"} · hmac v{id.HmacVersion}");
+        if (_orquestador != null)
+            EmitirEvento("config_applied", DateTimeOffset.Now, null, new Dictionary<string, object?> { ["version"] = _config.Version });
+    }
+
+    /// <summary>Llega con la respuesta de cada lote (hilo del subidor). Solo se anota y se guarda si
+    /// cambió; el icono lo pinta el siguiente tick.</summary>
+    private void AplicarConsultorio(ConsultorioDelServidor? consultorio)
+    {
+        var id = _identidad;
+        if (id == null) return;
+        if (id.ConsultorioId == consultorio?.Id && id.ConsultorioNombre == consultorio?.Nombre) return;
+        id.ConsultorioId = consultorio?.Id;
+        id.ConsultorioNombre = consultorio?.Nombre;
+        GuardarEstado();
+        Registro.Anota("consultorio", consultorio == null ? "desasignado desde el panel" : $"asignado desde el panel: {consultorio.Nombre}");
+        if (consultorio != null) _bandeja?.Aviso("Consultorio asignado", $"Este PC mide {consultorio.Nombre}.");
     }
 
     private void GuardarEstado()
     {
         try
         {
-            var estado = new EstadoEnDisco { Identidad = _identidad, Config = _config, Roster = _roster.ToList() };
-            File.WriteAllText(Rutas.ArchivoDeEstado, JsonSerializer.Serialize(estado));
+            lock (_candadoEstado)
+            {
+                var estado = new EstadoEnDisco { Identidad = _identidad, Config = _config };
+                File.WriteAllText(Rutas.ArchivoDeEstado, JsonSerializer.Serialize(estado));
+            }
         }
         catch (Exception e) { Registro.Excepcion("estado", e); }
     }
@@ -434,7 +531,29 @@ public sealed class Programa
     private static string VersionApp()
         => typeof(Programa).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
 
-    // ── Apagado ──────────────────────────────────────────────────────────────
+    // ── Apagado y colapso ────────────────────────────────────────────────────
+
+    /// <summary>Lo que no puede perderse aunque el proceso muera ya: la visita SAP en curso, TODAS las
+    /// cubetas (incluida la que está a medias: no llegará ningún tick más), la última foto de la
+    /// jornada y el `medidor_stop` con su motivo. Sin subir nada: el spool lo guarda y el siguiente
+    /// proceso lo manda. Idempotente: el apagado y el colapso pueden coincidir.</summary>
+    public void VolcarAntesDeMorir(string reason)
+    {
+        if (_volcado) return;
+        _volcado = true;
+        try
+        {
+            if (_spool == null) return;
+            var pared = DateTimeOffset.Now;
+            _orquestador?.CerrarVisitaPendiente(pared);
+            _orquestador?.OlvidarEncounter(pared, reason);
+            CosecharYEncolar(todo: true);
+            if (_jornadas.Actual != null) EmitirJornada(_jornadas.Actual, _calidad);
+            EmitirEvento("medidor_stop", pared, null, new Dictionary<string, object?> { ["reason"] = reason });
+            Registro.Anota("medidor", $"volcado ({reason})");
+        }
+        catch (Exception e) { Registro.Excepcion("volcado", e); }
+    }
 
     private void Apagar()
     {
@@ -443,9 +562,7 @@ public sealed class Programa
         try
         {
             Registro.Anota("medidor", "apagando");
-            var cierre = _sesion?.Cerrar(DateTimeOffset.Now, "apagado");
-            if (cierre != null) CerrarTurno(cierre);
-            EmitirEvento("medidor_stop", DateTimeOffset.UtcNow, null, null, null);
+            VolcarAntesDeMorir("apagado");
             // Un último intento de subida, acotado: si la red está, se va limpio; si no, el spool lo guarda.
             try { _subidor?.LatirAsync().Wait(TimeSpan.FromSeconds(8)); } catch (Exception e) { Registro.Excepcion("subida", e); }
             _sap?.Dispose();
@@ -460,6 +577,5 @@ public sealed class Programa
     {
         public Identidad? Identidad { get; set; }
         public ConfigDeMedicion? Config { get; set; }
-        public List<MedicoDelRoster>? Roster { get; set; }
     }
 }

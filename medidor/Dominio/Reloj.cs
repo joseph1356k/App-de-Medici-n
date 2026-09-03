@@ -12,13 +12,16 @@ public sealed record Tic(int AporteMs, long HuecoMs, long DesfaseRelojMs);
 ///
 /// EL FALLO QUE ESTO IMPIDE: el PC se suspende a las 14:00 y despierta a las 17:00 — un reloj
 /// ingenuo suma tres horas de «trabajo». Aquí el tick aporta como mucho 2 s, el resto queda
-/// contado como hueco (la calidad del turno lo hereda), y si la pared se mueve sin que el
+/// contado como hueco (la calidad de la jornada lo hereda), y si la pared se mueve sin que el
 /// monotónico se mueva —alguien ajustó la hora— el desfase se dice en vez de tragarse.
+///
+/// Y TODO lo que un tick no aporta es hueco, también los estancamientos de 2–10 s (el hilo
+/// principal atascado en COM, un antivirus): antes solo contaban los mayores de 10 s y esos
+/// segundos desaparecían del tiempo y de la cobertura sin dejar rastro (promesa 24).
 /// </summary>
 public sealed class Reloj
 {
     public const int AporteMaxMs = 2000;
-    public const int HuecoDesdeMs = 10_000;
     public const int DesfaseDesdeMs = 30_000;
 
     private long _monotonico;
@@ -38,7 +41,7 @@ public sealed class Reloj
         _pared = paredUtc;
 
         var aporte = (int)Math.Min(deltaMono, AporteMaxMs);
-        var hueco = deltaMono > HuecoDesdeMs ? deltaMono - aporte : 0;
+        var hueco = deltaMono - aporte;
         var desvio = deltaPared - deltaMono;
         var desfase = Math.Abs(desvio) >= DesfaseDesdeMs ? desvio : 0;
 

@@ -10,9 +10,10 @@ namespace Medidor;
 ///
 /// La clave se deriva POR DÍA OPERATIVO, con corte a las 06:00: entre días las huellas no se
 /// pueden enlazar (más privado, y ninguna métrica del estudio necesita ese enlace), y el corte a
-/// las 06:00 —no a medianoche— existe porque un turno nocturno abre a las 19:00 y cruza las 00:00:
-/// si la clave rotara ahí, el mismo paciente daría dos huellas en el mismo turno. El turno FIJA su
-/// día operativo al abrirse (promesa 5).
+/// las 06:00 —no a medianoche— existe porque una noche de urgencias cruza las 00:00: si la clave
+/// rotara ahí, el mismo paciente daría dos huellas en la misma noche. La clave se deriva en cada
+/// tick del día operativo de la hora local (promesas 5 y 30): a las 06:00 rota sola, y la jornada
+/// —no un turno— es la unidad que la acompaña.
 /// </summary>
 public static class Huella
 {

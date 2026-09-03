@@ -4,13 +4,15 @@ using System.Runtime.Versioning;
 namespace Medidor.App;
 
 /// <summary>La cuenta de input desde la última cosecha: cuántos clics, cuánto scroll, los instantes
-/// de tecleo (para medir ráfagas, en la escala interna de los ganchos) y hace cuántos ms fue el
-/// último input. NUNCA qué tecla — el gancho ni siquiera mira el código de tecla.
+/// de tecleo (para medir ráfagas, en la escala interna de los ganchos), hace cuántos ms fue el
+/// último input SEGÚN LOS GANCHOS y hace cuántos SEGÚN EL SISTEMA (GetLastInputInfo, el testigo
+/// independiente). NUNCA qué tecla — el gancho ni siquiera conserva el código de tecla.
 ///
-/// `UltimoInputHaceMs` es RELATIVO (ms desde ahora), no un timestamp absoluto: los ganchos y el
+/// Los «hace cuánto» son RELATIVOS (ms desde ahora), no timestamps absolutos: los ganchos y el
 /// orquestador tienen relojes monotónicos distintos, y restar timestamps entre relojes distintos no
 /// significa nada. El valor relativo sí es comparable en cualquier reloj.</summary>
-public sealed record ContadoresDeInput(int Clics, int Scroll, IReadOnlyList<long> InstantesDeTecla, long UltimoInputHaceMs,
+public sealed record ContadoresDeInput(int Clics, int Scroll, IReadOnlyList<long> InstantesDeTecla,
+    long UltimoInputHaceMs, long UltimoInputSistemaHaceMs,
     int Tabs = 0, int Enters = 0, int Correcciones = 0, int Copias = 0, int Pegados = 0, int Guardados = 0);
 
 /// <summary>
@@ -21,7 +23,11 @@ public sealed record ContadoresDeInput(int Clics, int Scroll, IReadOnlyList<long
 ///
 /// Si SetWindowsHookEx falla (antivirus, política del hospital), se degrada: sin ganchos, la
 /// actividad se saca de GetLastInputInfo (activo/idle sí, conteos no) y se emite hooks_degradados.
-/// Eso es visible en la calidad del turno — el estudio sabe que ese PC midió menos.
+/// Y si Windows los QUITA en silencio (un hilo que tardó en contestar), el orquestador lo nota por
+/// SaludDeGanchos y los REARMA (<see cref="Rearmar"/>): cada rearme se cuenta y viaja en la jornada.
+///
+/// Los callbacks van en try/catch: una excepción dentro de un gancho de bajo nivel es un colapso
+/// del proceso entero, y aquí lo único que puede fallar es un contador.
 /// </summary>
 [SupportedOSPlatform("windows")]
 public sealed class Ganchos : IDisposable
@@ -42,7 +48,7 @@ public sealed class Ganchos : IDisposable
     [DllImport("user32.dll")] private static extern IntPtr CallNextHookEx(IntPtr hook, int code, IntPtr wParam, IntPtr lParam);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr GetModuleHandleW(string? name);
 
-    // GetLastInputInfo: el respaldo cuando los ganchos no entran.
+    // GetLastInputInfo: el testigo independiente (y el respaldo cuando los ganchos no entran).
     [StructLayout(LayoutKind.Sequential)] private struct LASTINPUTINFO { public uint cbSize; public uint dwTime; }
     [DllImport("user32.dll")] private static extern bool GetLastInputInfo(ref LASTINPUTINFO info);
     [DllImport("kernel32.dll")] private static extern uint GetTickCount();
@@ -57,8 +63,13 @@ public sealed class Ganchos : IDisposable
     private readonly List<long> _teclas = new();
     private long _ultimoInputMono;
     private readonly object _candado = new();
+    private int _erroresEnCallback, _erroresAnotados;
 
+    /// <summary>true si el último Enganchar no consiguió los dos ganchos (antivirus/política).</summary>
     public bool Degradado { get; private set; }
+
+    /// <summary>Cuántas veces se rearmaron en este proceso. Viaja en la jornada (hooks_rearmados).</summary>
+    public int Rearmados { get; private set; }
 
     public Ganchos()
     {
@@ -68,39 +79,54 @@ public sealed class Ganchos : IDisposable
 
     public void Enganchar()
     {
+        if (_mouseHook != IntPtr.Zero || _kbHook != IntPtr.Zero) Desenganchar();
         var mod = GetModuleHandleW(null);
         _mouseHook = SetWindowsHookExW(WH_MOUSE_LL, _mouseProc, mod, 0);
         _kbHook = SetWindowsHookExW(WH_KEYBOARD_LL, _kbProc, mod, 0);
-        if (_mouseHook == IntPtr.Zero || _kbHook == IntPtr.Zero)
-        {
-            Degradado = true;
+        var antes = Degradado;
+        Degradado = _mouseHook == IntPtr.Zero || _kbHook == IntPtr.Zero;
+        if (Degradado && !antes)
             Registro.Anota("ganchos", "degradado a GetLastInputInfo: SetWindowsHookEx no entró (antivirus/política)");
-        }
+    }
+
+    public void Desenganchar()
+    {
+        if (_mouseHook != IntPtr.Zero) { UnhookWindowsHookEx(_mouseHook); _mouseHook = IntPtr.Zero; }
+        if (_kbHook != IntPtr.Zero) { UnhookWindowsHookEx(_kbHook); _kbHook = IntPtr.Zero; }
+    }
+
+    /// <summary>Desenganchar + enganchar. Devuelve si los dos ganchos entraron; si entraron, ya no
+    /// está degradado.</summary>
+    public bool Rearmar()
+    {
+        Desenganchar();
+        Enganchar();
+        Rearmados++;
+        return !Degradado;
     }
 
     /// <summary>Cosecha y pone a cero. Todo lo temporal se calcula con el reloj propio de los
-    /// ganchos y se devuelve RELATIVO, para que el orquestador no tenga que compartir reloj.</summary>
+    /// ganchos y se devuelve RELATIVO, para que el orquestador no tenga que compartir reloj. El
+    /// «hace cuánto» del sistema viaja siempre: es lo que permite notar unos ganchos muertos y lo
+    /// que sostiene el activo/idle cuando están degradados.</summary>
     public ContadoresDeInput Cosechar()
     {
+        var sistema = HaceSegunSistema();
         lock (_candado)
         {
             var ahora = _reloj.ElapsedMilliseconds;
-            if (Degradado)
-            {
-                // Sin ganchos: la actividad se saca de GetLastInputInfo. No hay conteos ni ráfagas,
-                // solo «hace cuánto hubo input», que es lo que necesita el activo/idle.
-                long haceMs = UmbralGrande;
-                var info = new LASTINPUTINFO { cbSize = (uint)Marshal.SizeOf<LASTINPUTINFO>() };
-                if (GetLastInputInfo(ref info))
-                    haceMs = unchecked(GetTickCount() - info.dwTime);
-                return new ContadoresDeInput(0, 0, Array.Empty<long>(), haceMs);
-            }
-
-            long ultimoHace = _ultimoInputMono == 0 ? UmbralGrande : Math.Max(0, ahora - _ultimoInputMono);
-            var r = new ContadoresDeInput(_clics, _scroll, _teclas.ToArray(), ultimoHace,
+            long ganchos = _ultimoInputMono == 0 ? UmbralGrande : Math.Max(0, ahora - _ultimoInputMono);
+            var r = new ContadoresDeInput(_clics, _scroll, _teclas.ToArray(), ganchos, sistema,
                 _tabs, _enters, _correcciones, _copias, _pegados, _guardados);
             _clics = 0; _scroll = 0; _teclas.Clear();
             _tabs = 0; _enters = 0; _correcciones = 0; _copias = 0; _pegados = 0; _guardados = 0;
+
+            var errores = Volatile.Read(ref _erroresEnCallback);
+            if (errores > _erroresAnotados)
+            {
+                _erroresAnotados = errores;
+                Registro.Anota("ganchos", $"{errores} excepción(es) tragadas dentro de un callback de gancho");
+            }
             return r;
         }
     }
@@ -108,51 +134,66 @@ public sealed class Ganchos : IDisposable
     // Un «hace mucho» cuando aún no hubo input: mayor que cualquier umbral de actividad razonable.
     private const long UmbralGrande = 24L * 3600 * 1000;
 
+    private static long HaceSegunSistema()
+    {
+        var info = new LASTINPUTINFO { cbSize = (uint)Marshal.SizeOf<LASTINPUTINFO>() };
+        if (!GetLastInputInfo(ref info)) return UmbralGrande;
+        return unchecked(GetTickCount() - info.dwTime); // aritmética uint: sobrevive al vuelco de 49 días
+    }
+
     private IntPtr MouseCb(int code, IntPtr wParam, IntPtr lParam)
     {
-        if (code >= 0)
+        try
         {
-            int msg = (int)wParam;
-            if (msg == WM_LBUTTONDOWN) lock (_candado) { _clics++; Marca(); }
-            else if (msg == WM_MOUSEWHEEL) lock (_candado) { _scroll++; Marca(); }
+            if (code >= 0)
+            {
+                int msg = (int)wParam;
+                if (msg == WM_LBUTTONDOWN) lock (_candado) { _clics++; Marca(); }
+                else if (msg == WM_MOUSEWHEEL) lock (_candado) { _scroll++; Marca(); }
+            }
         }
+        catch { Interlocked.Increment(ref _erroresEnCallback); } // nunca desde aquí: ni log ni excepción
         return CallNextHookEx(_mouseHook, code, wParam, lParam);
     }
 
     private IntPtr KbCb(int code, IntPtr wParam, IntPtr lParam)
     {
-        if (code >= 0)
+        try
         {
-            int msg = (int)wParam;
-            bool abajo = msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN;
-            bool arriba = msg == WM_KEYUP || msg == WM_SYSKEYUP;
-
-            // El código de la tecla (KBDLLHOOKSTRUCT.vkCode) se lee para UNA sola cosa: pasar por la
-            // lista blanca de TeclasDeControl (Tab, Enter, borrar, copiar, pegar, guardar) y seguir el
-            // estado de Ctrl/Mayús. No se guarda, no se acumula, no sale de esta función. Cualquier
-            // letra, número o símbolo es «Ninguna» y es indistinguible de los demás (promesa 23).
-            int vk = Marshal.ReadInt32(lParam);
-            if (vk is VK_CONTROL or VK_LCONTROL or VK_RCONTROL) { if (abajo) _ctrl = true; else if (arriba) _ctrl = false; }
-            else if (vk is VK_SHIFT or VK_LSHIFT or VK_RSHIFT) { if (abajo) _shift = true; else if (arriba) _shift = false; }
-            else if (abajo)
+            if (code >= 0)
             {
-                var clase = TeclasDeControl.Clasificar(vk, _ctrl, _shift);
-                lock (_candado)
+                int msg = (int)wParam;
+                bool abajo = msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN;
+                bool arriba = msg == WM_KEYUP || msg == WM_SYSKEYUP;
+
+                // El código de la tecla (KBDLLHOOKSTRUCT.vkCode) se lee para UNA sola cosa: pasar por la
+                // lista blanca de TeclasDeControl (Tab, Enter, borrar, copiar, pegar, guardar) y seguir el
+                // estado de Ctrl/Mayús. No se guarda, no se acumula, no sale de esta función. Cualquier
+                // letra, número o símbolo es «Ninguna» y es indistinguible de los demás (promesa 23).
+                int vk = Marshal.ReadInt32(lParam);
+                if (vk is VK_CONTROL or VK_LCONTROL or VK_RCONTROL) { if (abajo) _ctrl = true; else if (arriba) _ctrl = false; }
+                else if (vk is VK_SHIFT or VK_LSHIFT or VK_RSHIFT) { if (abajo) _shift = true; else if (arriba) _shift = false; }
+                else if (abajo)
                 {
-                    _teclas.Add(_reloj.ElapsedMilliseconds);
-                    Marca();
-                    switch (clase)
+                    var clase = TeclasDeControl.Clasificar(vk, _ctrl, _shift);
+                    lock (_candado)
                     {
-                        case TeclaDeControl.Tab: _tabs++; break;
-                        case TeclaDeControl.Enter: _enters++; break;
-                        case TeclaDeControl.Correccion: _correcciones++; break;
-                        case TeclaDeControl.Copiar: _copias++; break;
-                        case TeclaDeControl.Pegar: _pegados++; break;
-                        case TeclaDeControl.Guardar: _guardados++; break;
+                        _teclas.Add(_reloj.ElapsedMilliseconds);
+                        Marca();
+                        switch (clase)
+                        {
+                            case TeclaDeControl.Tab: _tabs++; break;
+                            case TeclaDeControl.Enter: _enters++; break;
+                            case TeclaDeControl.Correccion: _correcciones++; break;
+                            case TeclaDeControl.Copiar: _copias++; break;
+                            case TeclaDeControl.Pegar: _pegados++; break;
+                            case TeclaDeControl.Guardar: _guardados++; break;
+                        }
                     }
                 }
             }
         }
+        catch { Interlocked.Increment(ref _erroresEnCallback); }
         return CallNextHookEx(_kbHook, code, wParam, lParam);
     }
 
@@ -163,9 +204,5 @@ public sealed class Ganchos : IDisposable
     /// último-input hablen la misma escala que el resto del medidor.</summary>
     public long AhoraMono => _reloj.ElapsedMilliseconds;
 
-    public void Dispose()
-    {
-        if (_mouseHook != IntPtr.Zero) UnhookWindowsHookEx(_mouseHook);
-        if (_kbHook != IntPtr.Zero) UnhookWindowsHookEx(_kbHook);
-    }
+    public void Dispose() => Desenganchar();
 }

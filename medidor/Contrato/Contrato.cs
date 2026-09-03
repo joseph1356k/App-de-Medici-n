@@ -1,19 +1,22 @@
 using Medidor;
+using Microsoft.Data.Sqlite;
 
 namespace Medidor.Pruebas;
 
 /// <summary>
-/// EL CONTRATO DEL MEDIDOR: lo que promete el instrumento que mide el trabajo clínico, escrito como
-/// pruebas que llaman al código real y corren sin pantalla, sin Windows y sin red.
+/// EL CONTRATO DEL MEDIDOR: 31 promesas — lo que promete el instrumento que mide el trabajo
+/// clínico, escrito como pruebas que llaman al código real y corren sin pantalla, sin Windows y
+/// sin red.
 ///
 /// Las promesas 1-6 son de PRIVACIDAD y van primero a propósito: este medidor se instala en
-/// urgencias, donde las pantallas llevan nombres y diagnósticos. Mientras el arnés no pueda
-/// demostrar que nada de eso sale en un lote, el resto del instrumento es cosmético.
+/// consultorios y urgencias, donde las pantallas llevan nombres y diagnósticos. Mientras el arnés
+/// no pueda demostrar que nada de eso sale en un lote, el resto del instrumento es cosmético.
 ///
 /// Y las de conteo existen porque un medidor que cuenta mal no se nota: los números «se ven
 /// normales». El repo ya pagó esa clase de fallo dos veces —el 29/30 con 19 pasos comidos, y el
 /// promedio de 1.461 ms que era UNA muestra colgada— y aquí el precio sería peor: contaminar un
-/// baseline que no se puede volver a medir. Spec: docs/specs/003-medidor-del-trabajo-clinico.md.
+/// baseline que no se puede volver a medir. Las 24-31 son de la v2: grabación continua por
+/// jornada, supervivencia del proceso y el cable v2 (contratos A–B del plan).
 /// </summary>
 internal static class Contrato
 {
@@ -24,34 +27,42 @@ internal static class Contrato
         Console.OutputEncoding = System.Text.Encoding.UTF8;
         Console.WriteLine("CONTRATO DEL MEDIDOR (el instrumento, aislado)\n");
 
-        Prueba("1. un lote serializado jamás contiene el título de la ventana de entrada", TituloJamasEnElLote);
+        Prueba("1. un lote serializado jamás contiene el título de la ventana de entrada; el usuario SAP sí viaja", TituloJamasEnElLote);
         Prueba("2. una app fuera de la lista blanca sale como «otro», y una web solo sale como dominio permitido", FueraDeListaEsOtro);
         Prueba("3. la identidad SAP viaja sin el sufijo vista: y sin el título de la ventana", SapSinVistaNiTitulo);
         Prueba("4. del identificador de paciente solo sale la huella: el crudo no sobrevive, y normalizar quita los ceros de la izquierda", SoloSaleLaHuella);
-        Prueba("5. la clave de la huella es la del día operativo que corta a las 06:00, y el turno la fija al abrirse", LaClaveEsDelDiaOperativo);
+        Prueba("5. la clave de la huella es la del día operativo que corta a las 06:00, y la jornada cambia ahí sola", LaClaveEsDelDiaOperativo);
         Prueba("6. la misma persona da la misma huella dentro del día operativo, y otra persona da otra", MismaPersonaMismaHuella);
         Prueba("7. un tick jamás aporta más de 2 000 ms: despertar de una suspensión no regala horas, y el salto queda contado", UnTickNoRegalaHoras);
         Prueba("8. activo es input en los últimos 60 s; sin input el tiempo es de primer plano, no activo", ActivoEsInputReciente);
         Prueba("9. la escritura se mide por ráfagas — huecos de hasta 1,5 s se unen — y del tecleo solo salen cantidades, jamás qué tecla fue", EscrituraPorRafagas);
-        Prueba("10. una cubeta se parte cuando cambia la app o el encounter, y las partes suman el total sin doble conteo", LaCubetaSeParteSinDobleConteo);
-        Prueba("11. cada milisegundo cae en exactamente una cubeta de 15 s alineada al reloj de pared", CadaMsEnUnaCubeta);
-        Prueba("12. un turno se cierra solo por una causa escrita, y el cierre la dice", ElTurnoCierraConCausa);
-        Prueba("13. un turno sin médico mide igual, y se puede reasignar a un médico mientras siga abierto — nunca después", SinMedicoMideIgual);
+        Prueba("10. una cubeta se parte cuando cambia la app, el encounter o el usuario SAP, y las partes suman el total sin doble conteo", LaCubetaSeParteSinDobleConteo);
+        Prueba("11. cada milisegundo cae en exactamente una cubeta de 15 s alineada al reloj de pared, y bucket_ms es 15 000", CadaMsEnUnaCubeta);
+        Prueba("12. la jornada es el único límite: a las 06:00 cambia sola, sin input ni turno, y entrega la cerrada", LaJornadaEsElUnicoLimite);
+        Prueba("13. un PC bloqueado sigue emitiendo cubetas «bloqueado» con activo 0, sin paciente ni usuario SAP; sin foco es «otro»", BloqueadoSigueGrabando);
         Prueba("14. el spool no pierde ni duplica: lo tomado sin confirmación se vuelve a entregar idéntico, y la confirmación lo borra de una vez", ElSpoolNoPierdeNiDuplica);
-        Prueba("15. el spool lleno descarta lo más viejo contando cada descarte — jamás en silencio", ElSpoolLlenoDescartaContando);
-        Prueba("16. un lote respeta los topes por colección, y una fila que el servidor rechazó como veneno sale del spool en vez de reintentarse para siempre", ElLoteRespetaTopesYVeneno);
+        Prueba("15. el spool lleno descarta lo más viejo contando cada descarte — jamás en silencio — y sabe su formato", ElSpoolLlenoDescartaContando);
+        Prueba("16. un lote respeta los topes por colección; una fila rechazada (veneno, por nombre del spool) sale, y una no procesada se reentrega", ElLoteRespetaTopesYVeneno);
         Prueba("17. cada evento lleva un uid monotónico por instalación que sobrevive al reinicio: el mismo evento no entra dos veces", ElUidSobreviveAlReinicio);
-        Prueba("18. la calidad del turno cuenta lo que faltó: huecos, saltos de reloj, descartes y ganchos degradados", LaCalidadCuentaLoQueFalto);
+        Prueba("18. la calidad de la jornada cuenta lo que faltó: huecos, saltos, descartes, ganchos degradados y rearmados, SAP sin scripting, relanzos", LaCalidadCuentaLoQueFalto);
         Prueba("19. una visita SAP empieza al llegar a una identidad y termina al salir: su duración y su destino salen del stream, no de un cronómetro aparte", LaVisitaSaleDelStream);
         Prueba("20. la espera de SAP es la suma de sus round-trips: StartRequest abre, EndRequest cierra, y un cierre sin pareja no resta", LaEsperaEsLaSumaDeRoundtrips);
         Prueba("21. time-to-ready va de la llegada al primer EndRequest sin Busy; si nunca llega queda nulo, no cero", ReadyNuloNoCero);
-        Prueba("22. cada fila del lote lleva el seq del spool con nombre propio (spool_seq), sin pisar el seq de la cubeta", ElSeqDelSpoolNoPisaElDeLaCubeta);
+        Prueba("22. el sobre v2 lleva jornadas y app_version, no shifts; cada fila abre con spool_seq y las muestras llevan dia_operativo y sap_user, no shift_id", ElSeqDelSpoolNoPisaElDeLaCubeta);
         Prueba("23. del teclado solo se distinguen Tab, Enter, borrar, copiar, pegar y guardar; una letra es indistinguible de otra, y al lote viajan cantidades, jamás códigos", SoloTeclasDeControl);
+        Prueba("24. un reloj que se atasca 5 s aporta 2 s y cuenta 3 s de hueco", UnRelojAtascadoCuentaSuHueco);
+        Prueba("25. ganchos ciegos mientras el sistema ve input se rearman al 3.er chequeo; en la pantalla de bloqueo no", GanchosCiegosSeRearman);
+        Prueba("26. un colapso relanza como mucho 5 veces en 10 min; el sexto se deja al vigilante", UnColapsoRelanzaCincoVeces);
+        Prueba("27. un spool corrupto se aparta con fecha y se recrea vacío sin tumbar el arranque", UnSpoolCorruptoSeAparta);
+        Prueba("28. de una jornada solo viaja la última foto pendiente del proceso y del día; las de otro proceso o día no se tocan", SoloViajaLaUltimaFoto);
+        Prueba("29. al pasar a formato 2 las filas v1 se purgan contando, una sola vez", LasFilasV1SePurganUnaVez);
+        Prueba("30. la clave de la huella se deriva por tick del día operativo: a las 05:59 y 06:01 la misma persona da huellas distintas, sin turno", LaClaveSeDerivaPorTick);
+        Prueba("31. la jornada lleva proceso_id: dos fotos del mismo día desde procesos distintos se distinguen", LaJornadaLlevaProcesoId);
 
         Console.WriteLine();
         Console.WriteLine(_fallos == 0
-            ? "MEDIDOR ÍNTEGRO: el instrumento promete lo que dice prometer."
-            : $"MEDIDOR ROTO: {_fallos} promesa(s) incumplida(s).");
+            ? $"MEDIDOR ÍNTEGRO: el instrumento promete lo que dice prometer ({_veredicto.Count}/{_veredicto.Count})."
+            : $"MEDIDOR ROTO: {_fallos} promesa(s) incumplida(s) ({_veredicto.Count(v => v.Cumple)}/{_veredicto.Count}).");
 
         Apuntar();
         return _fallos;
@@ -65,6 +76,8 @@ internal static class Contrato
     /// saboteando el Normalizador a propósito antes de dar verde la fase (regla nº5 del ciclo).
     /// </remarks>
     private const string TituloHostil = "Historia clínica — Juan Pérez Gómez (CC 123456789) - Google Chrome";
+
+    private const string VersionDePrueba = "2.0.0";
 
     private static ConfigDeNormalizacion Config() => new(
         AppsPorProceso: new Dictionary<string, string>
@@ -85,6 +98,8 @@ internal static class Contrato
         return Path.Combine(dir, nombre);
     }
 
+    private static readonly TimeSpan Bogota = TimeSpan.FromHours(-5); // América/Bogotá no cambia de hora
+
     // ── Privacidad (1-6) ─────────────────────────────────────────────────────
 
     private static void TituloJamasEnElLote()
@@ -92,7 +107,6 @@ internal static class Contrato
         var cfg = Config();
         var cubetas = new Cubetas();
         var t0 = new DateTimeOffset(2026, 9, 1, 13, 0, 0, TimeSpan.Zero);
-        var shift = Guid.NewGuid();
 
         // Una web hostil, una app desconocida hostil, y un SAP con sufijo vista: hostil.
         var web = Normalizador.Normalizar(new EntradaDeSuperficie("chrome.exe", TituloHostil, "https://itsmiracleai.com.co/app", null), cfg);
@@ -103,16 +117,18 @@ internal static class Contrato
         var aporte = new Aportes(1000, 1000, 200, 5, 2, 1, 0, 0, 0);
         cubetas.Registrar(t0.AddSeconds(1), web, null, aporte);
         cubetas.Registrar(t0.AddSeconds(2), rara, null, aporte);
-        cubetas.Registrar(t0.AddSeconds(3), sap, "a1b2c3", aporte);
+        cubetas.Registrar(t0.AddSeconds(3), sap, "a1b2c3", aporte, "MEDICO01"); // el login del médico sí viaja; el título no
 
         using var spool = new SpoolSqlite(RutaTemporal("lote.db"));
-        foreach (var m in cubetas.CosecharTodo()) spool.Encolar("muestras", Cable.Muestra(shift, m));
-        spool.Encolar("eventos", Cable.Evento("encounter_enter", t0, shift, "a1b2c3",
+        foreach (var m in cubetas.CosecharTodo()) spool.Encolar("muestras", Cable.Muestra(m));
+        spool.Encolar("eventos", Cable.Evento("encounter_enter", t0, "a1b2c3",
             new Dictionary<string, object?> { ["reason"] = "regla", ["titulo"] = TituloHostil }));
-        var calidad = new Calidad();
-        spool.Encolar("turnos", Cable.Turno(new Turno(shift, null, null, t0, new DateOnly(2026, 9, 1), 1), null, "MEDICO01", calidad));
+        spool.Encolar("visitas", Cable.Visita(
+            new Visita("sapgui://QAS/NWP1/SAPLN_WP_FRAMEWORK/0100", "QAS", "NWP1", "0100", t0, t0.AddSeconds(5), 5000, null, 0, 0, null),
+            "a1b2c3", "MEDICO01"));
+        spool.Encolar("jornadas", Cable.Jornada(new Jornada(new DateOnly(2026, 9, 1), t0, t0.AddSeconds(3)), new Calidad(), VersionDePrueba, 1, Guid.NewGuid()));
 
-        var lote = Lote.Serializar("dev-1", Guid.NewGuid().ToString(), t0.AddMinutes(1), spool.Tomar(new LimitesDeLote()));
+        var lote = Lote.Serializar("dev-1", Guid.NewGuid().ToString(), t0.AddMinutes(1), VersionDePrueba, spool.Tomar(new LimitesDeLote()));
 
         Debe(!lote.Contains("Juan"), "el nombre del título no aparece en el lote");
         Debe(!lote.Contains("Pérez") && !lote.Contains("Perez"), "el apellido tampoco");
@@ -120,6 +136,7 @@ internal static class Contrato
         Debe(!lote.Contains("vista:"), "ni el sufijo vista: de la identidad SAP");
         Debe(!lote.Contains("Historia"), "ni ningún fragmento del título");
         Debe(lote.Contains("a1b2c3"), "la huella sí viaja: sin ella no hay encounter");
+        Debe(lote.Contains("\"sap_user\":\"MEDICO01\""), "el usuario SAP (login del médico, no del paciente) sí viaja, por cubeta y por visita");
         Debe(lote.Contains("\"reason\":\"regla\""), "del detail sobrevive lo de la lista blanca");
     }
 
@@ -175,30 +192,34 @@ internal static class Contrato
     }
 
     /// <remarks>
-    /// El corte a las 06:00 existe por los turnos nocturnos: uno que abre a las 19:00 cruza la
-    /// medianoche, y si la clave rotara a las 00:00 el mismo paciente daría DOS huellas en el mismo
-    /// turno — el entrelazado A→B→A de urgencias quedaría partido justo donde más importa.
-    /// Y la clave se FIJA al abrir el turno: rotar a mitad de turno tendría el mismo efecto.
+    /// El corte a las 06:00 existe por las noches de urgencias: cruzan la medianoche, y si la clave
+    /// rotara a las 00:00 el mismo paciente daría DOS huellas en la misma noche — el entrelazado
+    /// A→B→A quedaría partido justo donde más importa. Ya no hay turno que «fije» la clave: la
+    /// jornada cambia a las 06:00 y la clave con ella, sin que nadie toque nada.
     /// </remarks>
     private static void LaClaveEsDelDiaOperativo()
     {
-        var tz = TimeSpan.FromHours(-5); // América/Bogotá no cambia de hora
-        Debe(Huella.DiaOperativo(new DateTimeOffset(2026, 9, 1, 5, 59, 0, tz)) == new DateOnly(2026, 8, 31),
+        Debe(Huella.DiaOperativo(new DateTimeOffset(2026, 9, 1, 5, 59, 0, Bogota)) == new DateOnly(2026, 8, 31),
             "a las 05:59 todavía es el día operativo anterior");
-        Debe(Huella.DiaOperativo(new DateTimeOffset(2026, 9, 1, 6, 1, 0, tz)) == new DateOnly(2026, 9, 1),
+        Debe(Huella.DiaOperativo(new DateTimeOffset(2026, 9, 1, 6, 1, 0, Bogota)) == new DateOnly(2026, 9, 1),
             "a las 06:01 ya es el nuevo");
+        Debe(Huella.DiaOperativo(new DateTimeOffset(2026, 9, 2, 2, 0, 0, Bogota)) == new DateOnly(2026, 9, 1),
+            "a las 02:00 de la madrugada sigue siendo el mismo día operativo — la noche no parte al paciente en dos");
 
         var secreto = System.Text.Encoding.UTF8.GetBytes("secreto-de-la-org");
         Debe(!Huella.ClaveDelDia(secreto, new DateOnly(2026, 8, 31)).SequenceEqual(Huella.ClaveDelDia(secreto, new DateOnly(2026, 9, 1))),
             "días operativos distintos, claves distintas: las huellas no se enlazan entre días");
 
-        var s = new Sesionizador();
-        var (turno, _) = s.Abrir(new DateTimeOffset(2026, 9, 1, 19, 0, 0, tz), "d1", "Ana", 1);
-        Debe(turno.DiaOperativo == new DateOnly(2026, 9, 1), "el turno de las 19:00 fija el día en que abrió");
-        Debe(Huella.DiaOperativo(new DateTimeOffset(2026, 9, 2, 2, 0, 0, tz)) == new DateOnly(2026, 9, 1),
-            "a las 02:00 de la madrugada sigue siendo el mismo día operativo — la noche no parte al paciente en dos");
-        Debe(Huella.DiaOperativo(new DateTimeOffset(2026, 9, 2, 6, 30, 0, tz)) != turno.DiaOperativo,
-            "a las 06:30 el día YA cambió: si el turno no fijara su clave, el mismo paciente daría otra huella antes del relevo");
+        var j = new Jornadas();
+        Debe(j.Avanzar(new DateTimeOffset(2026, 9, 1, 19, 0, 0, Bogota)) == null && j.Actual!.Dia == new DateOnly(2026, 9, 1),
+            "la jornada de las 19:00 es la del día en que empezó");
+        Debe(j.Avanzar(new DateTimeOffset(2026, 9, 2, 2, 0, 0, Bogota)) == null, "a las 02:00 sigue la misma jornada");
+        Debe(j.Avanzar(new DateTimeOffset(2026, 9, 2, 5, 59, 0, Bogota)) == null, "y a las 05:59 también");
+        var cerrada = j.Avanzar(new DateTimeOffset(2026, 9, 2, 6, 1, 0, Bogota));
+        Debe(cerrada != null && cerrada.Dia == new DateOnly(2026, 9, 1), "a las 06:01 la jornada anterior se entrega cerrada");
+        Debe(j.Actual!.Dia == new DateOnly(2026, 9, 2), "y la nueva es del día nuevo");
+        Debe(!Huella.ClaveDelDia(secreto, cerrada!.Dia).SequenceEqual(Huella.ClaveDelDia(secreto, j.Actual.Dia)),
+            "con claves distintas: de las 05:59 a las 06:01 la huella rota sola, sin turno");
     }
 
     private static void MismaPersonaMismaHuella()
@@ -231,6 +252,10 @@ internal static class Contrato
         long dosHoras = 2L * 3600 * 1000;
         var salto = r.Avanzar(3000 + tresHoras, pared.AddSeconds(2).AddMilliseconds(tresHoras + dosHoras));
         Debe(salto.DesfaseRelojMs != 0, "si la pared salta sin que el monotónico salte, el desfase se dice — alguien movió el reloj");
+
+        var atascado = r.Avanzar(8000 + tresHoras, pared.AddSeconds(7).AddMilliseconds(tresHoras + dosHoras));
+        Debe(atascado.AporteMs == 2000 && atascado.HuecoMs == 3000 && atascado.DesfaseRelojMs == 0,
+            "un estancamiento de 5 s aporta 2 s y cuenta 3 s de hueco: antes esos 3 s desaparecían");
     }
 
     private static void ActivoEsInputReciente()
@@ -265,13 +290,16 @@ internal static class Contrato
         c.Registrar(t0.AddSeconds(2), sap, null, mil);
         c.Registrar(t0.AddSeconds(3), sap, "enc-1", mil);
         c.Registrar(t0.AddSeconds(4), chrome, null, mil);
+        c.Registrar(t0.AddSeconds(5), sap, "enc-1", mil, "MED02"); // mismo SAP y paciente, otro usuario SAP: otra parte
 
         var filas = c.CosecharTodo();
-        Debe(filas.Count == 3, "tres contextos distintos son tres partes, aunque uno vuelva");
+        Debe(filas.Count == 4, "cuatro contextos distintos son cuatro partes, aunque uno vuelva");
         Debe(filas.All(f => f.BucketStart == t0), "todas de la misma cubeta");
-        Debe(filas.Select(f => f.Seq).OrderBy(x => x).SequenceEqual(new[] { 0, 1, 2 }), "con su orden de aparición");
-        Debe(filas.Sum(f => f.ForegroundMs) == 4000, "y las partes suman el total: nada se cuenta dos veces ni se pierde");
-        Debe(filas.Single(f => f.EncounterKey == "enc-1").ForegroundMs == 1000, "el encounter parte la cubeta igual que la app");
+        Debe(filas.Select(f => f.Seq).OrderBy(x => x).SequenceEqual(new[] { 0, 1, 2, 3 }), "con su orden de aparición");
+        Debe(filas.Sum(f => f.ForegroundMs) == 5000, "y las partes suman el total: nada se cuenta dos veces ni se pierde");
+        Debe(filas.Count(f => f.EncounterKey == "enc-1") == 2 && filas.Single(f => f.SapUser == "MED02").ForegroundMs == 1000,
+            "el encounter parte la cubeta igual que la app, y el usuario SAP también");
+        Debe(filas.All(f => f.DiaOperativo == new DateOnly(2026, 9, 1)), "y toda parte sabe su día operativo");
     }
 
     private static void CadaMsEnUnaCubeta()
@@ -292,53 +320,75 @@ internal static class Contrato
         Debe(cerradas.Concat(resto).All(f => f.BucketStart.ToUnixTimeMilliseconds() % Cubetas.TamanoMs == 0),
             "toda cubeta arranca en un múltiplo exacto de 15 s del reloj de pared");
         Debe(cerradas.Sum(f => f.ForegroundMs) + resto.Sum(f => f.ForegroundMs) == 2000, "y entre las dos está todo lo aportado");
+        Debe(cerradas.Concat(resto).All(f => f.BucketMs == Cubetas.TamanoMs),
+            "bucket_ms es el tamaño de la cubeta (15 000), no lo que se vio en ella — antes llevaba foreground_ms por un argumento mal pasado");
     }
 
-    // ── El turno (12-13) ─────────────────────────────────────────────────────
+    // ── La jornada y la grabación continua (12-13) ───────────────────────────
 
-    private static void ElTurnoCierraConCausa()
+    /// <remarks>
+    /// EL FALLO QUE ESTO IMPIDE: el turno se cerraba a las 4 h sin input o a las 2 h bloqueado y
+    /// solo se reabría con input; mientras tanto no se grababa NADA y la línea de tiempo quedaba en
+    /// blanco. La jornada no tiene causas de cierre: el único límite es el día operativo.
+    /// </remarks>
+    private static void LaJornadaEsElUnicoLimite()
     {
-        var t0 = new DateTimeOffset(2026, 9, 1, 7, 0, 0, TimeSpan.FromHours(-5));
-        var s = new Sesionizador();
-        s.Abrir(t0, "d1", "Ana", 1);
+        var j = new Jornadas();
+        var t0 = new DateTimeOffset(2026, 9, 1, 7, 0, 0, Bogota);
+        Debe(j.Actual == null, "sin latidos no hay jornada");
 
-        Debe(s.Avanzar(t0.AddHours(1), new EstadoDelPc(30_000, null)) == null, "con input reciente el turno sigue");
+        j.Avanzar(t0);
+        Debe(j.Actual != null && j.Actual.PrimeraMuestra == t0 && j.Actual.UltimaMuestra == t0, "el primer latido abre la jornada");
 
-        var porInactividad = s.Avanzar(t0.AddHours(5), new EstadoDelPc(Sesionizador.TimeoutInactividadMs + 1000, null));
-        Debe(porInactividad != null && porInactividad.Causa == "timeout_inactividad", "cuatro horas sin input cierran el turno, y el cierre lo dice");
-        Debe(s.Abierto == null, "cerrado es cerrado");
+        // 4 h sin input, 2 h bloqueado, 12 h de noche: nada de eso la cierra.
+        Debe(j.Avanzar(t0.AddHours(11)) == null && j.Avanzar(t0.AddHours(19)) == null,
+            "ni la inactividad ni la noche cierran nada: la jornada no depende de input ni de turno");
+        Debe(j.Actual!.UltimaMuestra == t0.AddHours(19), "y la última muestra avanza con cada latido");
 
-        s.Abrir(t0.AddHours(6), "d1", "Ana", 1);
-        var porBloqueo = s.Avanzar(t0.AddHours(9), new EstadoDelPc(0, Sesionizador.LockProlongadoMs + 1000));
-        Debe(porBloqueo != null && porBloqueo.Causa == "lock_prolongado", "dos horas bloqueado también cierran, con su propia causa");
-
-        s.Abrir(t0.AddHours(10), "d1", "Ana", 1);
-        var (_, cierreDelAnterior) = s.Abrir(t0.AddHours(11), "d2", "Luis", 1);
-        Debe(cierreDelAnterior != null && cierreDelAnterior.Causa == "turno_nuevo", "abrir con uno abierto cierra el anterior como «turno_nuevo»");
-
-        var manual = s.Cerrar(t0.AddHours(12), "manual");
-        Debe(manual != null && manual.Causa == "manual", "el cierre a mano dice «manual»");
-        Debe(s.Cerrar(t0.AddHours(13), "manual") == null, "cerrar lo cerrado no inventa un segundo cierre");
+        var cerrada = j.Avanzar(new DateTimeOffset(2026, 9, 2, 6, 0, 0, Bogota));
+        Debe(cerrada != null && cerrada.PrimeraMuestra == t0 && cerrada.UltimaMuestra == t0.AddHours(19),
+            "a las 06:00 en punto se entrega la cerrada, con su primera y su última muestra");
+        Debe(j.Actual!.Dia == new DateOnly(2026, 9, 2) && j.Actual.PrimeraMuestra == new DateTimeOffset(2026, 9, 2, 6, 0, 0, Bogota),
+            "y la nueva arranca ahí mismo");
+        Debe(j.Avanzar(new DateTimeOffset(2026, 9, 2, 6, 0, 1, Bogota)) == null, "un cierre por jornada, no uno por latido");
     }
 
     /// <remarks>
-    /// EL FALLO QUE ESTO IMPIDE: el selector se ignora en el cambio de turno —va a pasar— y un
-    /// medidor que exigiera médico dejaría de medir justo esos turnos. El baseline no se pierde por
-    /// un selector: se mide anónimo y se reasigna cuando alguien lo toque. Pero nunca DESPUÉS del
-    /// cierre: reatribuir un turno ya cerrado es reescribir historia.
+    /// Contrato 5 del plan: `app='bloqueado'`, `surface=null`, `encounter_key=null`, `sap_user=null`,
+    /// `active_ms=0`, `foreground_ms=transcurrido`. Antes un PC bloqueado no producía ninguna cubeta
+    /// y el panel no podía distinguir «bloqueado» de «el medidor murió».
     /// </remarks>
-    private static void SinMedicoMideIgual()
+    private static void BloqueadoSigueGrabando()
     {
-        var t0 = new DateTimeOffset(2026, 9, 1, 7, 0, 0, TimeSpan.FromHours(-5));
-        var s = new Sesionizador();
-        var (turno, _) = s.Abrir(t0, null, null, 1);
-        Debe(turno.DoctorId == null, "el turno existe sin médico");
+        var sap = new Superficie("sap", "sapgui://QAS/NWP1/P/0100");
 
-        Debe(s.Reasignar("d1", "Ana"), "y se le puede poner médico mientras está abierto");
-        Debe(s.Abierto!.DoctorId == "d1" && s.Abierto.DoctorNombre == "Ana", "la reasignación queda");
+        var bloqueado = Continuidad.Atribuir(true, sap, "enc-1", "MED01", true);
+        Debe(bloqueado.Superficie.App == Continuidad.AppBloqueado && bloqueado.Superficie.Surface == null,
+            "bloqueado es la app «bloqueado», sin superficie — aunque SAP siga abierto detrás");
+        Debe(bloqueado.EncounterKey == null && bloqueado.SapUser == null && !bloqueado.Activo,
+            "sin paciente, sin usuario SAP y nunca activo, aunque haya input (la contraseña no es trabajo)");
 
-        s.Cerrar(t0.AddHours(8), "manual");
-        Debe(!s.Reasignar("d2", "Luis"), "cerrado ya no se reasigna: eso sería reescribir historia");
+        var libre = Continuidad.Atribuir(false, sap, "enc-1", "MED01", true);
+        Debe(libre.Superficie == sap && libre.EncounterKey == "enc-1" && libre.SapUser == "MED01" && libre.Activo,
+            "desbloqueado, todo sigue como estaba");
+
+        var sinFoco = Continuidad.Atribuir(false, null, "enc-1", "MED01", false);
+        Debe(sinFoco.Superficie.App == Normalizador.AppOtro && sinFoco.Superficie.Surface == null && !sinFoco.Activo,
+            "sin ventana delante es «otro» (con su paciente y usuario), no un tick perdido");
+
+        var c = new Cubetas();
+        var t0 = new DateTimeOffset(2026, 9, 1, 13, 0, 0, TimeSpan.Zero);
+        for (int i = 0; i < 15; i++)
+            c.Registrar(t0.AddSeconds(i), bloqueado.Superficie, bloqueado.EncounterKey,
+                new Aportes(1000, bloqueado.Activo ? 1000 : 0, 0, 0, 0, 0, 0, 0, 0), bloqueado.SapUser);
+        var m = c.CosecharTodo().Single();
+        Debe(m.App == "bloqueado" && m.ForegroundMs == 15_000 && m.ActiveMs == 0,
+            "quince segundos bloqueado son UNA cubeta «bloqueado» con 15 s de primer plano y 0 de activo");
+
+        var json = Cable.Muestra(m);
+        Debe(json.Contains("\"app\":\"bloqueado\"") && json.Contains("\"surface\":null") && json.Contains("\"encounter_key\":null")
+             && json.Contains("\"sap_user\":null") && json.Contains("\"active_ms\":0") && json.Contains("\"foreground_ms\":15000"),
+            "y así viaja al servidor");
     }
 
     // ── El spool (14-17) ─────────────────────────────────────────────────────
@@ -365,7 +415,7 @@ internal static class Contrato
             spool.Encolar("muestras", "{\"n\":1}");
             spool.Encolar("muestras", "{\"n\":2}");
         }
-        // El kill a mitad de turno: se cerró el proceso sin confirmar. Nada se pierde.
+        // El kill a mitad de jornada: se cerró el proceso sin confirmar. Nada se pierde.
         using (var renacido = new SpoolSqlite(ruta))
         {
             var pendiente = renacido.Tomar(new LimitesDeLote());
@@ -381,7 +431,7 @@ internal static class Contrato
         {
             for (int i = 0; i < 100; i++) spool.Encolar("muestras", $"{{\"n\":{i},\"relleno\":\"{relleno}\"}}");
 
-            Debe(spool.DescartesAcumulados > 0, "el tope descarta — el disco de un PC de urgencias no es infinito");
+            Debe(spool.DescartesAcumulados > 0, "el tope descarta — el disco de un PC de consultorio no es infinito");
             var lote = spool.Tomar(new LimitesDeLote());
             Debe(!lote.Muestras.Any(f => f.Json.Contains("\"n\":0,")), "y lo descartado es lo más viejo, no lo recién medido");
             Debe(spool.BytesAproximados <= 8_000 + 500, "el spool queda alrededor de su tope");
@@ -389,6 +439,7 @@ internal static class Contrato
         using (var renacido = new SpoolSqlite(ruta, topeBytes: 8_000))
         {
             Debe(renacido.DescartesAcumulados > 0, "el conteo de descartes sobrevive al reinicio: el hueco no se olvida");
+            Debe(renacido.FormatoEnDisco == SpoolSqlite.Formato && SpoolSqlite.Formato == 2, "y el spool sabe su formato: 2, y lo conserva al reabrir");
         }
     }
 
@@ -406,6 +457,32 @@ internal static class Contrato
         var siguiente = spool.Tomar(new LimitesDeLote());
         Debe(siguiente.Muestras.All(f => f.Seq != envenenada.Seq),
             "y la fila que el servidor rechazó no vuelve: una fila mala no puede atascar la cola para siempre");
+
+        // El servidor nombra la colección con el nombre del spool (v2) o con el del cable (espejo
+        // v1): las dos se traducen al del spool; un nombre inventado no señala nada.
+        Debe(Cable.ColeccionDelSpool("samples") == "muestras" && Cable.ColeccionDelSpool("events") == "eventos"
+             && Cable.ColeccionDelSpool("sap_visits") == "visitas" && Cable.ColeccionDelSpool("jornadas") == "jornadas",
+            "los nombres del cable se traducen al del spool");
+        Debe(Cable.ColeccionDelSpool("muestras") == "muestras" && Cable.ColeccionDelSpool("eventos") == "eventos" && Cable.ColeccionDelSpool("visitas") == "visitas",
+            "y los del spool se quedan como están");
+        Debe(Cable.ColeccionDelSpool("shifts") == null && Cable.ColeccionDelSpool("turnos") == null && Cable.ColeccionDelSpool("") == null && Cable.ColeccionDelSpool(null) == null,
+            "un nombre desconocido es null: un veneno con colección inventada no borra nada");
+
+        // Contrato 2: confirmar = enviado − rechazadas − no_procesadas. La no procesada se queda y
+        // encabeza el siguiente lote; la rechazada se saca aparte y no vuelve.
+        var reentregar = siguiente.Muestras[1];
+        var rechazada = siguiente.Muestras[2];
+        var confirmables = Lote.Confirmables(siguiente,
+            noProcesadas: new[] { ("muestras", reentregar.Seq) },
+            veneno: new[] { ("muestras", rechazada.Seq) });
+        Debe(confirmables.Muestras.Count == siguiente.Muestras.Count - 2
+             && !confirmables.Muestras.Any(f => f.Seq == reentregar.Seq || f.Seq == rechazada.Seq),
+            "lo confirmable es lo enviado menos la rechazada y la no procesada");
+        spool.Envenenar("muestras", rechazada.Seq);
+        spool.Confirmar(confirmables);
+        var tercero = spool.Tomar(new LimitesDeLote());
+        Debe(tercero.Muestras.Count > 0 && tercero.Muestras[0].Seq == reentregar.Seq, "la no procesada se queda y encabeza el siguiente lote");
+        Debe(tercero.Muestras.All(f => f.Seq != rechazada.Seq), "y la rechazada no vuelve");
     }
 
     private static void ElUidSobreviveAlReinicio()
@@ -439,13 +516,33 @@ internal static class Contrato
         c.GanchosDegradados();
         c.TickSapSaltado();
         c.TickSapSaltado();
+        c.GanchoRearmado();
+        c.GanchoRearmado();
+        c.SapEnganchado();
+        c.SapEventosEnganchados();
+        c.Relanzo();
 
         Debe(c.HuecosMs == 7500 && c.Saltos == 1 && c.DescartesTotal == 3 && c.Degradados && c.TicksSapSaltados == 2,
             "cada carencia lleva su cuenta");
+        Debe(c.HooksRearmados == 2 && c.SapScripting == true && c.SapEventosCom == true && c.Relanzos == 1,
+            "también las de la v2: rearmes de ganchos, SAP con scripting y eventos COM, relanzos");
         var json = c.ComoJson();
         Debe(json.Contains("\"huecos_ms\":7500") && json.Contains("\"clock_jumps\":1")
              && json.Contains("\"spool_dropped\":3") && json.Contains("\"hooks_degradados\":true"),
-            "y viaja con nombre: una sesión de mala calidad tiene que poder excluirse del estudio");
+            "y viaja con nombre: una jornada de mala calidad tiene que poder excluirse del estudio");
+        Debe(json.Contains("\"hooks_rearmados\":2") && json.Contains("\"sap_scripting\":true")
+             && json.Contains("\"sap_eventos_com\":true") && json.Contains("\"relanzos\":1"),
+            "con las claves nuevas de la fila de jornada");
+
+        var vacia = new Calidad();
+        Debe(vacia.ComoJson().Contains("\"sap_scripting\":null") && vacia.ComoJson().Contains("\"sap_eventos_com\":null"),
+            "sin SAP a la vista, sap_scripting y sap_eventos_com son nulos — no false: no se sabe, no se inventa");
+        var sin = new Calidad();
+        sin.SapSinScripting();
+        Debe(sin.SapScripting == false, "SAP delante más de un minuto sin motor es un no");
+        sin.SapEnganchado();
+        sin.SapSinScripting();
+        Debe(sin.SapScripting == true, "y si el motor entra alguna vez, el sí gana");
     }
 
     // ── El viaje SAP (19-21) ─────────────────────────────────────────────────
@@ -453,7 +550,7 @@ internal static class Contrato
     private static (List<Visita> Visitas, Viaje Viaje) CorrerFixture()
     {
         var ruta = Path.Combine(AppContext.BaseDirectory, "bronce", "stream-sap.txt");
-        var pared0 = new DateTimeOffset(2026, 9, 1, 8, 0, 0, TimeSpan.FromHours(-5));
+        var pared0 = new DateTimeOffset(2026, 9, 1, 8, 0, 0, Bogota);
         var viaje = new Viaje();
         var visitas = new List<Visita>();
 
@@ -536,32 +633,53 @@ internal static class Contrato
     /// cubeta): dos claves iguales en un objeto. Un lector JSON se queda con la última, así que el
     /// servidor construía el uid con el seq de la cubeta (0, 1, 2…) y, al rechazar una fila, el
     /// cliente envenenaba la fila 0/1/2 del spool — otra, o ninguna. Se vio revisando el cable
-    /// contra la ingesta, no en producción (2026-09-01).
+    /// contra la ingesta, no en producción (2026-09-01). El sobre v2 además cambió de forma: sin
+    /// `shifts`, con `jornadas` y `app_version`, y cada muestra con su día operativo y su usuario SAP.
+    /// Con <c>CONTRATO_MOSTRAR_LOTE=1</c> imprime el sobre entero: es la referencia para la ingesta.
     /// </remarks>
     private static void ElSeqDelSpoolNoPisaElDeLaCubeta()
     {
         var t0 = new DateTimeOffset(2026, 9, 1, 13, 0, 0, TimeSpan.Zero);
-        var shift = Guid.NewGuid();
         var cubetas = new Cubetas();
         var aporte = new Aportes(1000, 1000, 0, 0, 1, 0, 0, 0, 0);
         // Dos contextos en la misma cubeta → dos muestras con seq de cubeta 0 y 1.
-        cubetas.Registrar(t0.AddSeconds(1), new Superficie("sap", "sapgui://QAS/NWP1/P/0100"), null, aporte);
+        cubetas.Registrar(t0.AddSeconds(1), new Superficie("sap", "sapgui://QAS/NWP1/P/0100"), null, aporte, "MED01");
         cubetas.Registrar(t0.AddSeconds(2), new Superficie("chrome", null), null, aporte);
 
         using var spool = new SpoolSqlite(RutaTemporal("cable.db"));
-        foreach (var m in cubetas.CosecharTodo()) spool.Encolar("muestras", Cable.Muestra(shift, m));
-        spool.Encolar("eventos", Cable.Evento("lock", t0, shift, null, null));
+        foreach (var m in cubetas.CosecharTodo()) spool.Encolar("muestras", Cable.Muestra(m));
+        spool.Encolar("eventos", Cable.Evento("lock", t0, null, null));
+        var calidad = new Calidad();
+        calidad.Hueco(1200);
+        spool.Encolar("jornadas", Cable.Jornada(new Jornada(new DateOnly(2026, 9, 1), t0, t0.AddSeconds(2)), calidad, VersionDePrueba, 1,
+            Guid.Parse("11111111-2222-3333-4444-555555555555")));
 
-        var lote = Lote.Serializar("dev-1", "b1", t0, spool.Tomar(new LimitesDeLote()));
+        var lote = Lote.Serializar("dev-1", "b1", t0, VersionDePrueba, spool.Tomar(new LimitesDeLote()));
+        if (Environment.GetEnvironmentVariable("CONTRATO_MOSTRAR_LOTE") == "1") Console.WriteLine("   lote v2 → " + lote);
+
         using var doc = System.Text.Json.JsonDocument.Parse(lote);
-        var muestras = doc.RootElement.GetProperty("samples").EnumerateArray().ToList();
-        var eventos = doc.RootElement.GetProperty("events").EnumerateArray().ToList();
+        var raiz = doc.RootElement;
+        var muestras = raiz.GetProperty("samples").EnumerateArray().ToList();
+        var eventos = raiz.GetProperty("events").EnumerateArray().ToList();
+        var jornadas = raiz.GetProperty("jornadas").EnumerateArray().ToList();
 
+        Debe(raiz.GetProperty("app_version").GetString() == VersionDePrueba && raiz.TryGetProperty("client_now", out _) && raiz.TryGetProperty("batch_id", out _),
+            "el sobre lleva app_version, client_now y batch_id");
+        Debe(!raiz.TryGetProperty("shifts", out _) && raiz.TryGetProperty("sap_visits", out _), "sin shifts: la unidad es la jornada");
+        Debe(jornadas.Count == 1 && jornadas[0].GetProperty("proceso_id").GetString() == "11111111-2222-3333-4444-555555555555"
+             && jornadas[0].GetProperty("huecos_ms").GetInt64() == 1200, "la jornada viaja con su proceso_id y su calidad");
         Debe(muestras.Count == 2, "las dos muestras viajan");
         Debe(muestras.All(m => m.TryGetProperty("spool_seq", out _)), "cada muestra lleva su spool_seq");
         Debe(muestras.Select(m => m.GetProperty("spool_seq").GetInt64()).Distinct().Count() == 2, "los spool_seq son distintos entre filas");
         Debe(muestras.Select(m => m.GetProperty("seq").GetInt32()).OrderBy(x => x).SequenceEqual(new[] { 0, 1 }), "el seq de la cubeta (0 y 1) sigue intacto");
-        Debe(eventos.Count == 1 && eventos[0].TryGetProperty("spool_seq", out _), "el evento lleva su spool_seq");
+        Debe(muestras.All(m => m.GetProperty("dia_operativo").GetString() == "2026-09-01" && m.GetProperty("bucket_ms").GetInt32() == 15_000),
+            "cada muestra lleva su dia_operativo y bucket_ms 15 000");
+        Debe(muestras.Any(m => m.GetProperty("sap_user").GetString() == "MED01") && muestras.Any(m => m.GetProperty("sap_user").ValueKind == System.Text.Json.JsonValueKind.Null),
+            "y su sap_user (o null si no lo hubo)");
+        Debe(eventos.Count == 1 && eventos[0].TryGetProperty("spool_seq", out _) && eventos[0].GetProperty("dia_operativo").GetString() == "2026-09-01",
+            "el evento lleva su spool_seq y su dia_operativo");
+        Debe(!lote.Contains("shift_id"), "ninguna fila lleva shift_id");
+        Debe(System.Text.RegularExpressions.Regex.Matches(lote, "\\{\"spool_seq\":").Count == 4, "las cuatro filas abren con spool_seq");
         Debe(!System.Text.RegularExpressions.Regex.IsMatch(lote, "\\{\"seq\":"), "ninguna fila abre con «seq»: el del spool ya no se llama así");
     }
 
@@ -592,10 +710,220 @@ internal static class Contrato
         cubetas.Registrar(t0, new Superficie("sap", "sapgui://QAS/NV2000/P/0100"), null,
             new Aportes(1000, 1000, 400, 12, 0, 0, 0, 0, 0, Tabs: 3, Enters: 1, Correcciones: 2, Copias: 1, Pegados: 1, Guardados: 1));
         var m = cubetas.CosecharTodo().Single();
-        var json = Cable.Muestra(Guid.NewGuid(), m);
+        var json = Cable.Muestra(m);
         Debe(json.Contains("\"tabs\":3") && json.Contains("\"correcciones\":2") && json.Contains("\"pegados\":1") && json.Contains("\"guardados\":1"), "las cantidades viajan");
         Debe(!json.Contains("vk", StringComparison.OrdinalIgnoreCase) && !json.Contains("0x") && !json.Contains("VK_"), "ningún código de tecla viaja");
         Debe(m.Teclas == 12, "las teclas de control también cuentan como teclas");
+    }
+
+    // ── La v2: precisión y supervivencia (24-31) ─────────────────────────────
+
+    /// <remarks>
+    /// Antes solo los huecos mayores de 10 s contaban; un hilo principal atascado 2–10 s en COM o
+    /// por un antivirus perdía esos segundos del tiempo y de la cobertura sin dejar rastro.
+    /// </remarks>
+    private static void UnRelojAtascadoCuentaSuHueco()
+    {
+        var pared = new DateTimeOffset(2026, 9, 1, 14, 0, 0, TimeSpan.Zero);
+        var r = new Reloj(0, pared);
+
+        var uno = r.Avanzar(1000, pared.AddSeconds(1));
+        Debe(uno.AporteMs == 1000 && uno.HuecoMs == 0, "un tick de 1 s aporta 1 s y no deja hueco");
+        var dos = r.Avanzar(3000, pared.AddSeconds(3));
+        Debe(dos.AporteMs == 2000 && dos.HuecoMs == 0, "uno de 2 s aporta los 2 s justos");
+        var cinco = r.Avanzar(8000, pared.AddSeconds(8));
+        Debe(cinco.AporteMs == 2000 && cinco.HuecoMs == 3000, "uno de 5 s aporta 2 s y cuenta 3 s de hueco");
+        var nueve = r.Avanzar(17_000, pared.AddSeconds(17));
+        Debe(nueve.AporteMs == 2000 && nueve.HuecoMs == 7000, "y uno de 9 s cuenta 7 s: por debajo de 10 s ya no desaparece nada");
+        Debe(uno.DesfaseRelojMs == 0 && cinco.DesfaseRelojMs == 0 && nueve.DesfaseRelojMs == 0, "un atasco no es un salto de reloj: la pared y el monotónico avanzaron igual");
+    }
+
+    /// <remarks>
+    /// Windows quita un gancho de bajo nivel en silencio si su hilo tarda en contestar. El testigo es
+    /// GetLastInputInfo: si el sistema vio input hace poco y los ganchos no, están ciegos. Tres
+    /// chequeos (30 s) para no reaccionar a un tick raro; en la pantalla de bloqueo no se sospecha.
+    /// </remarks>
+    private static void GanchosCiegosSeRearman()
+    {
+        var s = new SaludDeGanchos();
+        Debe(!s.Evaluar(500, 500, false), "sistema y ganchos ven input: sanos");
+        Debe(!s.Evaluar(500, 20_000, false) && !s.Evaluar(500, 21_000, false), "dos chequeos ciegos todavía no rearman");
+        Debe(s.Evaluar(500, 22_000, false), "el tercero seguido sí");
+        Debe(!s.Evaluar(500, 23_000, false), "y el contador vuelve a cero tras rearmar");
+
+        var b = new SaludDeGanchos();
+        Debe(!b.Evaluar(500, 20_000, true) && !b.Evaluar(500, 21_000, true) && !b.Evaluar(500, 22_000, true),
+            "en la pantalla de bloqueo los ganchos no ven nada con razón: nunca se rearman");
+        Debe(!b.Evaluar(500, 23_000, false) && !b.Evaluar(500, 24_000, false), "y al desbloquear la cuenta empieza de cero (no arrastra las sospechas del bloqueo)");
+
+        var q = new SaludDeGanchos();
+        Debe(!q.Evaluar(500, 20_000, false) && !q.Evaluar(500, 21_000, false), "dos sospechas");
+        Debe(!q.Evaluar(30_000, 40_000, false), "sin input del sistema no hay sospecha (nadie está usando el PC)");
+        Debe(!q.Evaluar(500, 20_000, false), "y la racha se reinició: una sospecha nueva no completa las dos viejas");
+
+        var v = new SaludDeGanchos();
+        Debe(!v.Evaluar(500, 20_000, false) && !v.Evaluar(500, 500, false) && !v.Evaluar(500, 20_000, false) && !v.Evaluar(500, 20_000, false),
+            "las sospechas tienen que ser SEGUIDAS: un chequeo sano en medio las borra");
+    }
+
+    private static void UnColapsoRelanzaCincoVeces()
+    {
+        var t0 = new DateTimeOffset(2026, 9, 1, 8, 0, 0, Bogota);
+        IReadOnlyList<DateTimeOffset> historial = Array.Empty<DateTimeOffset>();
+        for (int i = 0; i < GuardiaDeRelanzos.Maximo; i++)
+        {
+            var (relanzar, nuevo) = GuardiaDeRelanzos.Evaluar(historial, t0.AddMinutes(i));
+            Debe(relanzar && nuevo.Count == i + 1, $"el colapso {i + 1} se relanza y queda en el historial");
+            historial = nuevo;
+        }
+        var (sexto, tras) = GuardiaDeRelanzos.Evaluar(historial, t0.AddMinutes(5));
+        Debe(!sexto && tras.Count == GuardiaDeRelanzos.Maximo, "el sexto en 10 min NO se relanza: se lo queda el vigilante, y no se apunta");
+
+        var (masTarde, ventana) = GuardiaDeRelanzos.Evaluar(tras, t0.AddMinutes(10.5));
+        Debe(masTarde && ventana.Count == GuardiaDeRelanzos.Maximo, "diez minutos y medio después el primero salió de la ventana y se vuelve a relanzar");
+        Debe(ventana.All(t => t > t0), "el historial solo conserva los últimos 10 min: el primero ya no está");
+    }
+
+    /// <remarks>
+    /// Era la excepción del arranque que dejaba el medidor apagado con un MessageBox que nadie veía
+    /// (spool.db corrupto tras un corte de luz). Ahora se aparta y se sigue.
+    /// </remarks>
+    private static void UnSpoolCorruptoSeAparta()
+    {
+        var ruta = RutaTemporal("spool.db");
+        File.WriteAllText(ruta, string.Concat(Enumerable.Repeat("esto no es una base de datos sqlite, es un archivo roto tras un corte de luz\n", 80)));
+
+        using var spool = new SpoolSqlite(ruta);
+        Debe(spool.ArchivoCorrupto != null, "el arranque no se cae: el archivo se dio por corrupto");
+        Debe(spool.ArchivoCorrupto != null && File.Exists(spool.ArchivoCorrupto) && Path.GetFileName(spool.ArchivoCorrupto).StartsWith("spool.corrupto-"),
+            "y se apartó con fecha junto al original, para el forense");
+        Debe(File.Exists(ruta), "en su sitio hay una base nueva");
+        var seq = spool.Encolar("eventos", "{\"kind\":\"medidor_start\"}");
+        Debe(seq >= 1 && spool.Tomar(new LimitesDeLote()).Eventos.Count == 1, "que funciona desde el primer momento");
+        Debe(spool.FormatoEnDisco == SpoolSqlite.Formato, "y ya nace en formato 2");
+
+        using var sano = new SpoolSqlite(RutaTemporal("sano.db"));
+        Debe(sano.ArchivoCorrupto == null, "un spool sano no aparta nada");
+    }
+
+    /// <remarks>
+    /// Sin red, la foto de la jornada se encolaría cada 5 min y `jornadas` crecería sin decir nada
+    /// nuevo: la última foto del proceso contiene a las anteriores (los contadores son monótonos).
+    /// Las de otro proceso o de otro día son otras filas del servidor: no se tocan.
+    /// </remarks>
+    private static void SoloViajaLaUltimaFoto()
+    {
+        using var spool = new SpoolSqlite(RutaTemporal("fotos.db"));
+        var t0 = new DateTimeOffset(2026, 9, 1, 8, 0, 0, Bogota);
+        var p1 = Guid.NewGuid(); var p2 = Guid.NewGuid();
+        var hoy = new Jornada(new DateOnly(2026, 9, 1), t0, t0);
+        var ayer = new Jornada(new DateOnly(2026, 8, 31), t0.AddDays(-1), t0.AddDays(-1));
+        var cal = new Calidad();
+
+        spool.Encolar("jornadas", Cable.Jornada(hoy, cal, VersionDePrueba, 1, p1));
+        var deAyer = spool.Encolar("jornadas", Cable.Jornada(ayer, cal, VersionDePrueba, 1, p1));
+        var deOtroProceso = spool.Encolar("jornadas", Cable.Jornada(hoy, cal, VersionDePrueba, 1, p2));
+        cal.Hueco(1000);
+        spool.Encolar("jornadas", Cable.Jornada(hoy, cal, VersionDePrueba, 1, p1));
+        cal.Hueco(1000);
+        var ultima = spool.Encolar("jornadas", Cable.Jornada(hoy, cal, VersionDePrueba, 1, p1));
+
+        Debe(spool.Compactar("jornadas", hoy.Dia, p1) == 2, "de tres fotos del mismo proceso y día sobran dos");
+        var lote = spool.Tomar(new LimitesDeLote());
+        Debe(lote.Jornadas.Count == 3, "quedan la última del proceso, la de ayer y la del otro proceso");
+        Debe(lote.Jornadas.Any(f => f.Seq == ultima) && lote.Jornadas.Single(f => f.Seq == ultima).Json.Contains("\"huecos_ms\":2000"),
+            "la que se conserva es la más nueva, con la calidad acumulada");
+        Debe(lote.Jornadas.Any(f => f.Seq == deAyer) && lote.Jornadas.Any(f => f.Seq == deOtroProceso), "las ajenas no se tocan");
+        Debe(spool.Compactar("jornadas", hoy.Dia, p1) == 0, "compactar otra vez no borra nada más");
+        Debe(spool.Compactar("jornadas", hoy.Dia, Guid.NewGuid()) == 0, "ni un proceso que no tiene fotos");
+    }
+
+    /// <remarks>
+    /// Un spool de la v1 tiene filas con shift_id que el servidor v2 rechazaría una a una (y cada
+    /// rechazo es un veneno y una línea de log). Se purgan al abrir, se cuentan (spool_drop con
+    /// reason formato_v1) y la marca de formato impide repetirlo.
+    /// </remarks>
+    private static void LasFilasV1SePurganUnaVez()
+    {
+        var ruta = RutaTemporal("v1.db");
+        using (var db = new SqliteConnection($"Data Source={ruta};Pooling=False"))
+        {
+            db.Open();
+            using var cmd = db.CreateCommand();
+            cmd.CommandText = """
+                CREATE TABLE filas(seq INTEGER PRIMARY KEY AUTOINCREMENT, coleccion TEXT NOT NULL, json TEXT NOT NULL, bytes INTEGER NOT NULL);
+                CREATE TABLE meta(clave TEXT PRIMARY KEY, valor INTEGER NOT NULL);
+                INSERT INTO meta(clave, valor) VALUES('descartes', 4);
+                INSERT INTO filas(coleccion, json, bytes) VALUES
+                  ('turnos',   '{"shift_id":"x"}', 16),
+                  ('muestras', '{"shift_id":"x"}', 16),
+                  ('eventos',  '{"shift_id":"x"}', 16);
+                """;
+            cmd.ExecuteNonQuery();
+        }
+
+        using (var spool = new SpoolSqlite(ruta))
+        {
+            Debe(spool.FilasV1Purgadas == 3, "las tres filas v1 se purgan contando");
+            Debe(spool.Tomar(new LimitesDeLote()).Vacio, "y el spool queda vacío");
+            Debe(spool.FormatoEnDisco == 2, "con la marca de formato 2");
+            Debe(spool.DescartesAcumulados == 4, "los descartes históricos del spool se conservan (no son contadores de jornada)");
+            spool.Encolar("muestras", "{\"app\":\"otro\"}");
+        }
+        using (var renacido = new SpoolSqlite(ruta))
+        {
+            Debe(renacido.FilasV1Purgadas == 0, "una sola vez: al reabrir no se purga nada");
+            Debe(renacido.Tomar(new LimitesDeLote()).Muestras.Count == 1, "y lo encolado en formato 2 sigue ahí");
+        }
+    }
+
+    /// <remarks>
+    /// Antes el turno «fijaba» la clave al abrirse. Sin turno, la clave se deriva en cada tick del
+    /// día operativo de la hora de pared: cruza las 06:00 sola, sin input.
+    /// </remarks>
+    private static void LaClaveSeDerivaPorTick()
+    {
+        var secreto = System.Text.Encoding.UTF8.GetBytes("secreto-de-la-org");
+        byte[] ClaveEn(DateTimeOffset pared) => Huella.ClaveDelDia(secreto, Huella.DiaOperativo(pared));
+
+        var a0559 = Huella.DeIdentificador(ClaveEn(new DateTimeOffset(2026, 9, 2, 5, 59, 0, Bogota)), "555001");
+        var a0601 = Huella.DeIdentificador(ClaveEn(new DateTimeOffset(2026, 9, 2, 6, 1, 0, Bogota)), "555001");
+        var a0200 = Huella.DeIdentificador(ClaveEn(new DateTimeOffset(2026, 9, 2, 2, 0, 0, Bogota)), "555001");
+        var ayer1900 = Huella.DeIdentificador(ClaveEn(new DateTimeOffset(2026, 9, 1, 19, 0, 0, Bogota)), "555001");
+
+        Debe(a0559 != a0601, "a las 05:59 y a las 06:01 la misma persona da huellas distintas: la clave rotó sola");
+        Debe(a0559 == a0200 && a0200 == ayer1900, "y de las 19:00 a las 05:59 (cruzando la medianoche) da la misma");
+        Debe(Huella.DeIdentificador(ClaveEn(new DateTimeOffset(2026, 9, 2, 6, 0, 0, Bogota)), "555001") == a0601,
+            "el corte es exactamente a las 06:00:00");
+    }
+
+    private static void LaJornadaLlevaProcesoId()
+    {
+        var t0 = new DateTimeOffset(2026, 9, 1, 8, 0, 0, Bogota);
+        var j = new Jornada(new DateOnly(2026, 9, 1), t0, t0.AddHours(3));
+        var p1 = Guid.NewGuid(); var p2 = Guid.NewGuid();
+        var c1 = new Calidad(); c1.Hueco(500); c1.Relanzo();
+        var c2 = new Calidad();
+
+        using var f1 = System.Text.Json.JsonDocument.Parse(Cable.Jornada(j, c1, VersionDePrueba, 3, p1));
+        using var f2 = System.Text.Json.JsonDocument.Parse(Cable.Jornada(j, c2, VersionDePrueba, 3, p2));
+        var a = f1.RootElement; var b = f2.RootElement;
+
+        Debe(a.GetProperty("proceso_id").GetGuid() == p1 && b.GetProperty("proceso_id").GetGuid() == p2 && p1 != p2,
+            "cada foto lleva el proceso que la tomó");
+        Debe(a.GetProperty("dia_operativo").GetString() == "2026-09-01" && b.GetProperty("dia_operativo").GetString() == "2026-09-01",
+            "del mismo día operativo");
+        Debe(a.GetProperty("relanzos").GetInt32() == 1 && b.GetProperty("relanzos").GetInt32() == 0
+             && a.GetProperty("huecos_ms").GetInt64() == 500 && b.GetProperty("huecos_ms").GetInt64() == 0,
+            "con contadores propios de cada proceso: el servidor los suma, no los mezcla");
+
+        string[] contrato4 = { "dia_operativo", "proceso_id", "primera_muestra_at", "ultima_muestra_at", "app_version", "hmac_version",
+            "huecos_ms", "clock_jumps", "spool_dropped", "hooks_degradados", "hooks_rearmados", "ticks_sap_saltados_busy",
+            "sap_scripting", "sap_eventos_com", "relanzos" };
+        Debe(contrato4.All(k => a.TryGetProperty(k, out _)), "y con todas las claves del contrato 4 (spool_seq la pone el sobre)");
+        Debe(a.GetProperty("app_version").GetString() == VersionDePrueba && a.GetProperty("hmac_version").GetInt32() == 3
+             && a.GetProperty("primera_muestra_at").GetDateTime().ToUniversalTime() == t0.UtcDateTime,
+            "versión, hmac y las marcas de tiempo en UTC");
     }
 
     // ── El arnés ─────────────────────────────────────────────────────────────
