@@ -151,7 +151,8 @@ do $$ declare a encuentros%rowtype; b encuentros%rowtype; begin
   if a.tramos <> 2 or a.post_atencion_ms <> 1440000 or a.visitas <> 1 or a.siguiente_ms <> 0 then raise exception 'encuentro A: tramos % post % visitas % siguiente %', a.tramos, a.post_atencion_ms, a.visitas, a.siguiente_ms; end if;
   if b.activo_ms <> 1440000 or b.his_ms <> 1296000 or b.consulta_ms <> 1800000 or b.tramos <> 1 or b.post_atencion_ms <> 0 or b.siguiente_ms <> 0 then
     raise exception 'encuentro B: activo % his % consulta % tramos % post % siguiente %', b.activo_ms, b.his_ms, b.consulta_ms, b.tramos, b.post_atencion_ms, b.siguiente_ms; end if;
-  if a.sap_user <> 'MED01' or a.typing_ms <> 648000 or a.keystrokes <> 4800 then raise exception 'encuentro A: sap_user % typing % teclas %', a.sap_user, a.typing_ms, a.keystrokes; end if;
+  -- tecleo: las 240 cubetas de A traen 3000 ms (también las de chrome) → 720 000; teclas 240 × 20
+  if a.sap_user <> 'MED01' or a.typing_ms <> 720000 or a.keystrokes <> 4800 then raise exception 'encuentro A: sap_user % typing % teclas %', a.sap_user, a.typing_ms, a.keystrokes; end if;
   if a.consultorio_id <> (select id from consultorios where nombre = 'Consultorio 1') then raise exception 'encuentro A sin consultorio'; end if;
   if a.ready_ms_p50 <> 850 or b.ready_ms_p50 is not null then raise exception 'encuentros: ready_ms_p50 %/%', a.ready_ms_p50, b.ready_ms_p50; end if;
 end $$;
