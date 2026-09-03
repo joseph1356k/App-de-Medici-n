@@ -19,7 +19,12 @@ export const COLUMNAS = {
     "pacientes", "consulta_ms_mediana", "activo_por_paciente_mediana", "entre_consultas_ms_mediana", "post_atencion_ms", "interrupciones", "pacientes_por_hora",
     "visitas", "pantallas_distintas", "revisitas_sap", "sap_wait_ms", "sap_roundtrips", "ready_ms_p50", "ready_ms_p95",
     "bloqueado_ms", "inactivo_ms", "sin_datos_ms", "cobertura_pct", "carga_admin_pct", "tramos", "tramos_ms", "procesos", "app_version",
+    "pre_atencion_ms", "cola_post_jornada_ms", "consulta_ms_p25", "consulta_ms_p75", "por_app", "por_hora",
     "activo_por_app", "sap_users", "calidad", "calidad_ok", "calidad_motivos", "algo_version", "resumido_en"],
+  pacientes: ["device_id", "consultorio_id", "consultorio", "dia_operativo", "phase", "orden", "encounter_key", "sap_user", "medico_id", "medico",
+    "primera_vez", "ultima_vez", "consulta_ms", "activo_ms", "his_ms", "miracle_ms", "typing_ms", "keystrokes", "clicks",
+    "tabs", "enters", "correcciones", "copias", "pegados", "guardados", "tramos", "post_atencion_ms", "siguiente_ms",
+    "visitas", "pantallas_distintas", "sap_wait_ms", "ready_ms_p50"],
   muestras: ["device_id", "consultorio_id", "dia_operativo", "phase", "bucket_start", "bucket_ms", "seq", "app", "surface", "encounter_key", "sap_user", "medico_id", "medico",
     "foreground_ms", "active_ms", "typing_ms", "keystrokes", "clicks", "scroll_ticks", "context_switches", "sap_roundtrips", "sap_wait_ms",
     "tabs", "enters", "correcciones", "copias", "pegados", "guardados"],
@@ -42,9 +47,21 @@ export function consulta(col: Coleccion, f: Filtros) {
         j.pacientes, j.consulta_ms_mediana, j.activo_por_paciente_mediana, j.entre_consultas_ms_mediana, j.post_atencion_ms, j.interrupciones, j.pacientes_por_hora,
         j.visitas, j.pantallas_distintas, j.revisitas_sap, j.sap_wait_ms, j.sap_roundtrips, j.ready_ms_p50, j.ready_ms_p95,
         j.bloqueado_ms, j.inactivo_ms, j.sin_datos_ms, j.cobertura_pct, j.carga_admin_pct, j.tramos, j.tramos_ms, j.procesos, j.app_version,
+        j.pre_atencion_ms, j.cola_post_jornada_ms, j.consulta_ms_p25, j.consulta_ms_p75, j.por_app, j.por_hora,
         j.activo_por_app, j.sap_users, j.calidad, j.calidad_ok, j.calidad_motivos, j.algo_version, j.resumido_en
         from jornada_summary j left join consultorios c on c.id = j.consultorio_id left join devices d on d.id = j.device_id
         where ${filtroJornadas(f)} order by j.dia_operativo, c.orden, d.machine_name`;
+    case "pacientes":
+      return sql`select e.device_id, e.consultorio_id, c.nombre as consultorio, e.dia_operativo::text as dia_operativo, j.phase, e.orden, e.encounter_key,
+        e.sap_user, medico_de(e.sap_user) as medico_id, r.display_name as medico,
+        e.primera_vez, e.ultima_vez, e.consulta_ms, e.activo_ms, e.his_ms, e.miracle_ms, e.typing_ms, e.keystrokes, e.clicks,
+        e.tabs, e.enters, e.correcciones, e.copias, e.pegados, e.guardados, e.tramos, e.post_atencion_ms, e.siguiente_ms,
+        e.visitas, e.pantallas_distintas, e.sap_wait_ms, e.ready_ms_p50
+        from encuentros e
+        left join jornada_summary j on j.device_id = e.device_id and j.dia_operativo = e.dia_operativo
+        left join consultorios c on c.id = e.consultorio_id
+        left join roster r on r.id = medico_de(e.sap_user)
+        where (e.device_id, e.dia_operativo) in (${jornadasFiltradas(f)}) order by e.dia_operativo, e.device_id, e.orden`;
     case "muestras":
       return sql`select x.device_id, x.consultorio_id, x.dia_operativo::text as dia_operativo, j.phase, x.bucket_start, x.bucket_ms, x.seq, x.app, x.surface, x.encounter_key,
         x.sap_user, medico_de(x.sap_user) as medico_id, r.display_name as medico,
@@ -109,7 +126,7 @@ async function* arrayJson(col: Coleccion, f: Filtros, tope: number): AsyncGenera
   yield "\n  ]";
 }
 
-/** El dataset autodescriptivo: diccionario + catálogos + jornadas + visitas + eventos (+ muestras). */
+/** El dataset autodescriptivo: diccionario + catálogos + jornadas + pacientes + visitas + eventos (+ muestras). */
 export async function* dataset(f: Filtros, conMuestras: boolean): AsyncGenerator<string> {
   const [fases, consultorios, medicos, dispositivos] = await Promise.all([
     sql`select phase, starts_on::text as starts_on, ends_on::text as ends_on, notes from study_phases order by starts_on`,
@@ -129,6 +146,8 @@ export async function* dataset(f: Filtros, conMuestras: boolean): AsyncGenerator
   const texto = JSON.stringify(cabecera, null, 2);
   yield texto.slice(0, -2) + ",\n  \"jornadas\": ";
   yield* arrayJson("jornadas", f, 1_000_000);
+  yield ",\n  \"pacientes\": ";
+  yield* arrayJson("pacientes", f, 500_000);
   yield ",\n  \"visitas_sap\": ";
   yield* arrayJson("visitas", f, 200_000);
   yield ",\n  \"eventos\": ";

@@ -338,6 +338,12 @@ create table if not exists jornada_summary (
   tramos_ms bigint not null default 0,
   procesos int not null default 0,
   app_version text not null default '',
+  pre_atencion_ms bigint not null default 0,      -- activo antes de abrir al primer paciente (arranque del día)
+  cola_post_jornada_ms bigint not null default 0, -- activo en SAP después de abrir al último paciente (la cola de documentación)
+  consulta_ms_p25 bigint,
+  consulta_ms_p75 bigint,
+  por_app jsonb not null default '{}'::jsonb,     -- {app: {activo_ms, foreground_ms, typing_ms, keystrokes, clicks}}
+  por_hora jsonb not null default '{}'::jsonb,    -- {"07": activo_ms, "08": …} hora de Bogotá
   calidad jsonb not null default '{}'::jsonb,
   calidad_ok boolean not null default false,
   calidad_motivos text[] not null default '{}',
@@ -347,6 +353,50 @@ create table if not exists jornada_summary (
   primary key (device_id, dia_operativo)
 );
 alter table jornada_summary enable row level security;
+-- Para bases que aplicaron la v2 antes del algo_version 2 (idempotente).
+alter table jornada_summary add column if not exists pre_atencion_ms bigint not null default 0;
+alter table jornada_summary add column if not exists cola_post_jornada_ms bigint not null default 0;
+alter table jornada_summary add column if not exists consulta_ms_p25 bigint;
+alter table jornada_summary add column if not exists consulta_ms_p75 bigint;
+alter table jornada_summary add column if not exists por_app jsonb not null default '{}'::jsonb;
+alter table jornada_summary add column if not exists por_hora jsonb not null default '{}'::jsonb;
+
+-- ── Encuentros: una fila por paciente y día ──────────────────────────────────
+-- Lo que cuesta CADA consulta, derivado de las cubetas al resumir la jornada (se regenera con
+-- ella). El paciente es la huella del día; `orden` es el P1, P2… de la línea de tiempo.
+create table if not exists encuentros (
+  device_id uuid not null references devices(id) on delete cascade,
+  dia_operativo date not null,
+  encounter_key text not null,
+  consultorio_id uuid references consultorios(id) on delete set null,
+  orden int not null default 0,
+  primera_vez timestamptz not null,
+  ultima_vez timestamptz not null,
+  consulta_ms bigint not null default 0,          -- reloj de pared: del primer toque al fin de la última cubeta
+  activo_ms bigint not null default 0,
+  his_ms bigint not null default 0,
+  miracle_ms bigint not null default 0,
+  typing_ms bigint not null default 0,
+  keystrokes bigint not null default 0,
+  clicks bigint not null default 0,
+  tabs bigint not null default 0,
+  enters bigint not null default 0,
+  correcciones bigint not null default 0,
+  copias bigint not null default 0,
+  pegados bigint not null default 0,
+  guardados bigint not null default 0,
+  tramos int not null default 1,                  -- rachas de atención: A→B→A da 2 para A
+  post_atencion_ms bigint not null default 0,     -- activo sobre este paciente después de abrir otro posterior
+  siguiente_ms bigint,                            -- del último toque de este paciente al primero del siguiente (nulo si fue el último)
+  visitas int not null default 0,
+  pantallas_distintas int not null default 0,
+  sap_wait_ms bigint not null default 0,
+  ready_ms_p50 bigint,
+  sap_user text,                                  -- el login con más activo sobre este paciente
+  primary key (device_id, dia_operativo, encounter_key)
+);
+alter table encuentros enable row level security;
+create index if not exists encuentros_consultorio_dia_idx on encuentros (consultorio_id, dia_operativo);
 create index if not exists jornada_summary_consultorio_idx on jornada_summary (consultorio_id, dia_operativo desc);
 create index if not exists jornada_summary_dia_idx on jornada_summary (dia_operativo desc);
 create index if not exists jornada_summary_phase_idx on jornada_summary (phase, consultorio_id);
@@ -395,10 +445,11 @@ begin
 end;
 $$;
 
--- EL RESUMEN de una jornada desde el crudo, en UNA sentencia con CTEs (algo_version = 1).
--- Recomputable: cambiar una definición y volver a correr no pierde nada. Con
--- p_min_intervalo > 0 hace de acelerador: si se resumió hace menos, solo la marca sucia y
--- devuelve false (la ingesta lo llama cada minuto; el cron termina lo sucio).
+-- EL RESUMEN de una jornada desde el crudo (algo_version = 2): primero los ENCUENTROS (una fila
+-- por paciente) y después la jornada, que lee de ellos. Recomputable: cambiar una definición y
+-- volver a correr no pierde nada. Con p_min_intervalo > 0 hace de acelerador: si se resumió
+-- hace menos, solo la marca sucia y devuelve false (la ingesta lo llama cada minuto; el cron
+-- termina lo sucio).
 --
 -- Definiciones:
 --   activo_ms          cubetas con input en los últimos 60 s (active_ms del .exe)
@@ -413,13 +464,17 @@ $$;
 --   entre_consultas    en cada cambio de paciente, del último instante del anterior al primero del siguiente
 --   interrupciones     vueltas a un paciente que ya se había abierto (A→B→A cuenta 1)
 --   post_atencion_ms   activo sobre un paciente A DESPUÉS de que se abrió otro paciente posterior
+--   pre_atencion_ms    activo antes de abrir al primer paciente del día (el arranque)
+--   cola_post_jornada  activo en SAP después de abrir al último paciente del día (la cola de documentación)
 --   revisitas_sap      volver a una pantalla ya visitada con el mismo paciente
+--   por_app / por_hora activo, tecleo y clics por app; activo por hora de Bogotá
 --   calidad_ok         spool_dropped = 0 y clock_jumps <= 2 y cobertura >= 80 (y hubo actividad)
 create or replace function recompute_jornada(p_device uuid, p_dia date, p_min_intervalo interval default interval '0')
 returns boolean language plpgsql as $$
 declare
   v_res timestamptz;
   v_dev_cons uuid;
+  v_cons uuid;
 begin
   select resumido_en into v_res from jornada_summary where device_id = p_device and dia_operativo = p_dia;
   if v_res is not null and p_min_intervalo > interval '0' and v_res > now() - p_min_intervalo then
@@ -427,7 +482,57 @@ begin
     return false;
   end if;
   select consultorio_id into v_dev_cons from devices where id = p_device;
+  -- El consultorio de la jornada es una foto: el estampado en la última cubeta del día, si no el del PC.
+  select coalesce((select s.consultorio_id from samples s where s.device_id = p_device and s.dia_operativo = p_dia and s.consultorio_id is not null
+                   order by s.bucket_start desc, s.seq desc limit 1), v_dev_cons) into v_cons;
 
+  -- 1) Los encuentros: lo que costó cada paciente.
+  delete from encuentros where device_id = p_device and dia_operativo = p_dia;
+  insert into encuentros (device_id, dia_operativo, encounter_key, consultorio_id, orden, primera_vez, ultima_vez, consulta_ms,
+    activo_ms, his_ms, miracle_ms, typing_ms, keystrokes, clicks, tabs, enters, correcciones, copias, pegados, guardados,
+    tramos, post_atencion_ms, siguiente_ms, visitas, pantallas_distintas, sap_wait_ms, ready_ms_p50, sap_user)
+  with b as (
+    select bucket_start, seq, app, encounter_key, sap_user, active_ms, typing_ms, keystrokes, clicks, tabs, enters, correcciones, copias, pegados, guardados
+    from samples s where s.device_id = p_device and s.dia_operativo = p_dia and s.encounter_key is not null),
+  pac as (
+    select encounter_key, min(bucket_start) primera, max(bucket_start) + interval '15 seconds' ultima,
+      sum(active_ms)::bigint act, coalesce(sum(active_ms) filter (where app = 'sap'), 0)::bigint his, coalesce(sum(active_ms) filter (where app = 'miracle_web'), 0)::bigint mir,
+      sum(typing_ms)::bigint typ, sum(keystrokes)::bigint ks, sum(clicks)::bigint cl,
+      sum(tabs)::bigint tabs, sum(enters)::bigint enters, sum(correcciones)::bigint corr, sum(copias)::bigint cop, sum(pegados)::bigint peg, sum(guardados)::bigint gua
+    from b group by encounter_key),
+  po as (
+    select bucket_start, seq, encounter_key, lag(bucket_start) over w prev_start, lag(encounter_key) over w prev_enc
+    from b window w as (order by bucket_start, seq)),
+  runs as (
+    select encounter_key, count(*) filter (where prev_enc is distinct from encounter_key)::int r from po group by encounter_key),
+  postp as (
+    select k.encounter_key, coalesce(sum(x.active_ms), 0)::bigint ms from pac k join b x on x.encounter_key = k.encounter_key
+    where exists (select 1 from pac o where o.encounter_key <> k.encounter_key and o.primera > k.primera and o.primera < x.bucket_start)
+    group by k.encounter_key),
+  usu as (
+    select distinct on (encounter_key) encounter_key, sap_user
+    from (select encounter_key, sap_user, sum(active_ms) ms from b where sap_user is not null group by 1, 2) z
+    order by encounter_key, ms desc),
+  visp as (
+    select encounter_key, count(*)::int visitas, count(distinct surface)::int pantallas, coalesce(sum(sap_wait_ms), 0)::bigint wait,
+      round(percentile_cont(0.5) within group (order by ready_ms) filter (where ready_ms is not null))::bigint p50
+    from sap_visits where device_id = p_device and dia_operativo = p_dia and encounter_key is not null group by encounter_key),
+  sig as (
+    select distinct on (prev_enc) prev_enc as encounter_key,
+      greatest(0, (extract(epoch from (bucket_start - prev_start)) * 1000 - 15000))::bigint gap
+    from po where prev_enc is not null and prev_enc <> encounter_key order by prev_enc, bucket_start)
+  select p_device, p_dia, k.encounter_key, v_cons, row_number() over (order by k.primera)::int,
+    k.primera, k.ultima, (extract(epoch from (k.ultima - k.primera)) * 1000)::bigint,
+    k.act, k.his, k.mir, k.typ, k.ks, k.cl, k.tabs, k.enters, k.corr, k.cop, k.peg, k.gua,
+    coalesce(r.r, 1), coalesce(pp.ms, 0), s.gap, coalesce(v.visitas, 0), coalesce(v.pantallas, 0), coalesce(v.wait, 0), v.p50, u.sap_user
+  from pac k
+  left join runs r on r.encounter_key = k.encounter_key
+  left join postp pp on pp.encounter_key = k.encounter_key
+  left join usu u on u.encounter_key = k.encounter_key
+  left join visp v on v.encounter_key = k.encounter_key
+  left join sig s on s.encounter_key = k.encounter_key;
+
+  -- 2) La jornada.
   insert into jornada_summary as j (
     device_id, dia_operativo, consultorio_id, phase,
     primera_actividad, ultima_actividad, primera_muestra, ultima_muestra, ventana_ms,
@@ -438,11 +543,12 @@ begin
     visitas, pantallas_distintas, revisitas_sap, sap_wait_ms, sap_roundtrips, ready_ms_p50, ready_ms_p95,
     bloqueado_ms, inactivo_ms, sin_datos_ms, cobertura_pct, carga_admin_pct,
     tramos, tramos_ms, procesos, app_version,
+    pre_atencion_ms, cola_post_jornada_ms, consulta_ms_p25, consulta_ms_p75, por_app, por_hora,
     calidad, calidad_ok, calidad_motivos, sucia, resumido_en, algo_version)
   with b as (
     -- Las cubetas del día. Dentro de una cubeta las partes (seq) se reparten los 15 s en
     -- proporción a su foreground: así bloqueado/inactivo suman tiempo real, no filas.
-    select s.bucket_start, s.seq, s.app, s.surface, s.encounter_key, s.sap_user, s.consultorio_id,
+    select s.bucket_start, s.seq, s.app, s.surface, s.encounter_key, s.sap_user,
       s.foreground_ms, s.active_ms, s.typing_ms, s.keystrokes, s.clicks, s.scroll_ticks, s.context_switches,
       s.sap_roundtrips, s.sap_wait_ms, s.tabs, s.enters, s.correcciones, s.copias, s.pegados, s.guardados,
       case when sum(greatest(s.foreground_ms, 0)) over (partition by s.bucket_start) > 0
@@ -461,8 +567,7 @@ begin
       coalesce(sum(tabs), 0)::bigint tabs, coalesce(sum(enters), 0)::bigint enters, coalesce(sum(correcciones), 0)::bigint corr,
       coalesce(sum(copias), 0)::bigint cop, coalesce(sum(pegados), 0)::bigint peg, coalesce(sum(guardados), 0)::bigint gua,
       coalesce(sum(dur_ms) filter (where app = 'bloqueado'), 0)::bigint bloq,
-      coalesce(sum(dur_ms) filter (where app <> 'bloqueado' and active_ms = 0), 0)::bigint inact,
-      count(distinct encounter_key) filter (where encounter_key is not null)::int pacientes
+      coalesce(sum(dur_ms) filter (where app <> 'bloqueado' and active_ms = 0), 0)::bigint inact
     from b),
   ventana as (
     select min(bucket_start) filter (where activa) pa,
@@ -477,6 +582,12 @@ begin
     where prev_fin is not null and bucket_start - prev_fin > interval '30 seconds'),
   apps as (
     select coalesce(jsonb_object_agg(app, ms), '{}'::jsonb) j from (select app, sum(active_ms) ms from b group by app) a),
+  detalle as (
+    select coalesce(jsonb_object_agg(app, jsonb_build_object('activo_ms', act, 'foreground_ms', fg, 'typing_ms', typ, 'keystrokes', ks, 'clicks', cl)), '{}'::jsonb) j
+    from (select app, sum(active_ms) act, sum(foreground_ms) fg, sum(typing_ms) typ, sum(keystrokes) ks, sum(clicks) cl from b group by app) a),
+  horas as (
+    select coalesce(jsonb_object_agg(h, ms), '{}'::jsonb) j
+    from (select to_char(bucket_start at time zone 'America/Bogota', 'HH24') h, sum(active_ms) ms from b group by 1) x),
   users as (
     select coalesce(jsonb_object_agg(sap_user, ms), '{}'::jsonb) j from (select sap_user, sum(active_ms) ms from b where sap_user is not null group by sap_user) u),
   isl as (
@@ -488,10 +599,15 @@ begin
         from cub where activa) x) y group by grp),
   tramos as (
     select count(*)::int n, coalesce(sum(extract(epoch from (t1 - t0)) * 1000 + 15000), 0)::bigint ms from isl),
-  pac as (
-    select encounter_key, min(bucket_start) primera, max(bucket_start) ultima, sum(active_ms) activo,
-           (extract(epoch from (max(bucket_start) - min(bucket_start))) * 1000 + 15000)::double precision consulta_ms
-    from b where encounter_key is not null group by encounter_key),
+  enc as (
+    select count(*)::int pacientes,
+      (percentile_cont(0.5) within group (order by consulta_ms::double precision))::bigint consulta_p50,
+      (percentile_cont(0.25) within group (order by consulta_ms::double precision))::bigint consulta_p25,
+      (percentile_cont(0.75) within group (order by consulta_ms::double precision))::bigint consulta_p75,
+      (percentile_cont(0.5) within group (order by activo_ms::double precision))::bigint activo_p50,
+      coalesce(sum(post_atencion_ms), 0)::bigint post, coalesce(sum(tramos - 1), 0)::int inter,
+      min(primera_vez) primer_paciente, max(primera_vez) ultimo_paciente
+    from encuentros where device_id = p_device and dia_operativo = p_dia),
   po as (
     select bucket_start, seq, encounter_key,
            lag(bucket_start) over w prev_start, lag(encounter_key) over w prev_enc
@@ -500,12 +616,10 @@ begin
     select percentile_cont(0.5) within group (order by gap) med from (
       select (extract(epoch from (bucket_start - prev_start)) * 1000 - 15000)::double precision gap from po
       where prev_enc is not null and prev_enc <> encounter_key) e where gap >= 0),
-  inter as (
-    select coalesce(sum(r - 1), 0)::int n from (
-      select encounter_key, count(*) filter (where prev_enc is distinct from encounter_key) r from po group by encounter_key) q),
-  post as (
-    select coalesce(sum(b.active_ms), 0)::bigint ms from b join pac k on k.encounter_key = b.encounter_key
-    where exists (select 1 from pac o where o.encounter_key <> k.encounter_key and o.primera > k.primera and o.primera < b.bucket_start)),
+  extra as (
+    select coalesce(sum(b.active_ms) filter (where b.bucket_start < enc.primer_paciente), 0)::bigint pre,
+           coalesce(sum(b.active_ms) filter (where b.app = 'sap' and b.bucket_start > enc.ultimo_paciente), 0)::bigint cola
+    from b, enc),
   vis as (
     select count(*)::int visitas, count(distinct surface)::int pantallas,
       coalesce(sum(sap_wait_ms), 0)::bigint wait, coalesce(sum(roundtrips), 0)::int rt,
@@ -520,28 +634,24 @@ begin
       coalesce(sum(ticks_sap_saltados_busy), 0)::int ticks,
       bool_or(sap_scripting) scripting, bool_or(sap_eventos_com) eventos_com, count(*)::int procesos, max(app_version) appv
     from jornadas where device_id = p_device and dia_operativo = p_dia),
-  cons as (
-    select coalesce((select consultorio_id from b where consultorio_id is not null order by bucket_start desc, seq desc limit 1), v_dev_cons) id),
   calc as (
     select greatest(0, coalesce(extract(epoch from (ventana.ua - ventana.pa)) * 1000, 0))::bigint ventana_ms,
            case when ventana.pa is null then null
                 else round(least(100.0, cubierto.ms * 100.0 / greatest(1, extract(epoch from (ventana.ua - ventana.pa)) * 1000))::numeric, 1) end cobertura
     from ventana, cubierto)
   select
-    p_device, p_dia, cons.id, phase_at(p_dia),
+    p_device, p_dia, v_cons, phase_at(p_dia),
     ventana.pa, ventana.ua, ventana.pm, ventana.um, calc.ventana_ms,
     tot.fg, tot.act, tot.his, tot.mir, apps.j, users.j,
     tot.typ, tot.ks, tot.cl, tot.sc, tot.cs,
     tot.tabs, tot.enters, tot.corr, tot.cop, tot.peg, tot.gua,
-    tot.pacientes,
-    (select percentile_cont(0.5) within group (order by consulta_ms) from pac)::bigint,
-    (select percentile_cont(0.5) within group (order by activo) from pac)::bigint,
-    entre.med::bigint, post.ms, inter.n,
-    case when tramos.ms > 0 then round((tot.pacientes * 3600000.0 / tramos.ms)::numeric, 2) end,
+    enc.pacientes, enc.consulta_p50, enc.activo_p50, entre.med::bigint, enc.post, enc.inter,
+    case when tramos.ms > 0 then round((enc.pacientes * 3600000.0 / tramos.ms)::numeric, 2) end,
     vis.visitas, vis.pantallas, vis.revis, vis.wait, vis.rt, vis.p50, vis.p95,
     tot.bloq, tot.inact, gaps.ms, calc.cobertura,
     case when tot.act > 0 then round((tot.his * 100.0 / tot.act)::numeric, 1) end,
     tramos.n, tramos.ms, cal.procesos, coalesce(cal.appv, ''),
+    extra.pre, extra.cola, enc.consulta_p25, enc.consulta_p75, detalle.j, horas.j,
     jsonb_build_object(
       'cobertura_pct', calc.cobertura, 'sin_datos_ms', gaps.ms, 'huecos_ms', cal.huecos, 'clock_jumps', cal.jumps,
       'spool_dropped', cal.dropped, 'hooks_degradados', cal.deg, 'hooks_rearmados', cal.rearm,
@@ -552,8 +662,8 @@ begin
       case when cal.jumps > 2 then 'clock_jumps' end,
       case when ventana.pa is not null and coalesce(calc.cobertura, 0) < 80 then 'cobertura' end,
       case when ventana.pa is null then 'sin_actividad' end], null::text),
-    false, now(), 1
-  from tot, ventana, cubierto, gaps, apps, users, tramos, entre, inter, post, vis, cal, cons, calc
+    false, now(), 2
+  from tot, ventana, cubierto, gaps, apps, detalle, horas, users, tramos, enc, entre, extra, vis, cal, calc
   on conflict (device_id, dia_operativo) do update set
     consultorio_id = excluded.consultorio_id, phase = excluded.phase,
     primera_actividad = excluded.primera_actividad, ultima_actividad = excluded.ultima_actividad,
@@ -572,6 +682,8 @@ begin
     bloqueado_ms = excluded.bloqueado_ms, inactivo_ms = excluded.inactivo_ms, sin_datos_ms = excluded.sin_datos_ms,
     cobertura_pct = excluded.cobertura_pct, carga_admin_pct = excluded.carga_admin_pct,
     tramos = excluded.tramos, tramos_ms = excluded.tramos_ms, procesos = excluded.procesos, app_version = excluded.app_version,
+    pre_atencion_ms = excluded.pre_atencion_ms, cola_post_jornada_ms = excluded.cola_post_jornada_ms,
+    consulta_ms_p25 = excluded.consulta_ms_p25, consulta_ms_p75 = excluded.consulta_ms_p75, por_app = excluded.por_app, por_hora = excluded.por_hora,
     calidad = excluded.calidad, calidad_ok = excluded.calidad_ok, calidad_motivos = excluded.calidad_motivos,
     sucia = false, resumido_en = now(), algo_version = excluded.algo_version;
   return true;
@@ -637,6 +749,7 @@ begin
     get diagnostics v_v = row_count;
     update jornadas jo set consultorio_id = p_consultorio where jo.device_id = p_device and jo.consultorio_id is null;
     get diagnostics v_j = row_count;
+    update encuentros en set consultorio_id = p_consultorio where en.device_id = p_device and en.consultorio_id is null;
     update jornada_summary m set consultorio_id = p_consultorio, sucia = true where m.device_id = p_device and m.consultorio_id is null;
   end if;
   select c.nombre into v_nombre from consultorios c where c.id = p_consultorio;

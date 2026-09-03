@@ -58,10 +58,23 @@ persona o una IA entienda cada campo sin más contexto.
 | `bloqueado_ms`, `inactivo_ms`, `sin_datos_ms` | los otros tres estados del día |
 | `cobertura_pct`, `carga_admin_pct` | calidad; % del activo que fue en SAP |
 | `tramos`, `tramos_ms` | islas de actividad |
+| `pre_atencion_ms`, `cola_post_jornada_ms` | activo antes de abrir al primer paciente (arranque); activo en SAP después de abrir al último (cola de documentación) |
+| `consulta_ms_p25`, `consulta_ms_p75` | percentiles de la duración de consulta |
+| `por_app`, `por_hora` | `{app: {activo_ms, foreground_ms, typing_ms, keystrokes, clicks}}`; `{"07": ms activos, …}` por hora de Bogotá |
 | `procesos`, `app_version` | arranques del medidor; versión |
 | `activo_por_app`, `sap_users` | `{app: ms}`; `{login SAP: ms}` |
 | `calidad`, `calidad_ok`, `calidad_motivos` | los contadores del instrumento (`huecos_ms`, `clock_jumps`, `spool_dropped`, `hooks_degradados`, `hooks_rearmados`, `ticks_sap_saltados_busy`, `sap_scripting`, `sap_eventos_com`, `procesos`), el veredicto y sus motivos |
 | `algo_version`, `resumido_en` | versión del algoritmo de resumen; cuándo se calculó |
+
+## `pacientes` — una fila por paciente y jornada (lo que costó cada consulta)
+
+`device_id`, `consultorio_id`, `consultorio`, `dia_operativo`, `phase`, `orden` (P1, P2… por primera
+aparición), `encounter_key`, `sap_user`, `medico_id`, `medico`, `primera_vez`, `ultima_vez`, `consulta_ms`
+(reloj de pared, incluye interrupciones), `activo_ms`, `his_ms`, `miracle_ms`, `typing_ms`, `keystrokes`,
+`clicks`, `tabs`, `enters`, `correcciones`, `copias`, `pegados`, `guardados`, `tramos` (rachas: A→B→A da 2),
+`post_atencion_ms`, `siguiente_ms` (del último toque al primero del siguiente paciente; nulo si fue el
+último), `visitas`, `pantallas_distintas`, `sap_wait_ms`, `ready_ms_p50`. Se regenera con el resumen de
+la jornada (tabla `encuentros`).
 
 ## `muestras` — la serie de 15 s
 
@@ -102,6 +115,7 @@ con claves de una lista cerrada: `reason`, `ms`, `count`, `user`, `rule`, `versi
 |---|---|
 | `/api/export/dataset.json?rango=30d` | todo junto, con `_leeme` (`&muestras=1` incluye la serie) |
 | `/api/export/jornadas.csv` · `.json` · `.ndjson` | jornadas |
+| `/api/export/pacientes.csv` · `.json` · `.ndjson` | pacientes (consultas) |
 | `/api/export/muestras.ndjson` · `.csv` · `.json` | serie de 15 s (streaming) |
 | `/api/export/visitas.csv` · … | visitas SAP |
 | `/api/export/eventos.csv` · … | eventos |

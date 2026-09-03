@@ -41,6 +41,9 @@ export type JornadaResumen = {
   ready_ms_p50: number | null; ready_ms_p95: number | null;
   bloqueado_ms: number; inactivo_ms: number; sin_datos_ms: number; cobertura_pct: number | null; carga_admin_pct: number | null;
   tramos: number; tramos_ms: number; procesos: number; app_version: string;
+  pre_atencion_ms: number; cola_post_jornada_ms: number; consulta_ms_p25: number | null; consulta_ms_p75: number | null;
+  por_app: Record<string, { activo_ms: number; foreground_ms: number; typing_ms: number; keystrokes: number; clicks: number }>;
+  por_hora: Record<string, number>;
   calidad: Record<string, number | boolean | null>; calidad_ok: boolean; calidad_motivos: string[];
   sucia: boolean; resumido_en: string | null; algo_version: number;
 };
@@ -234,7 +237,9 @@ const medianas = sql`
   percentile_cont(0.5) within group (order by j.bloqueado_ms) as bloqueado_med,
   percentile_cont(0.5) within group (order by j.inactivo_ms) as inactivo_med,
   percentile_cont(0.5) within group (order by j.sin_datos_ms) as sin_datos_med,
-  percentile_cont(0.5) within group (order by j.cobertura_pct) filter (where j.cobertura_pct is not null) as cobertura_med`;
+  percentile_cont(0.5) within group (order by j.cobertura_pct) filter (where j.cobertura_pct is not null) as cobertura_med,
+  percentile_cont(0.5) within group (order by j.pre_atencion_ms) as pre_med,
+  percentile_cont(0.5) within group (order by j.cola_post_jornada_ms) as cola_med`;
 
 export type Medianas = {
   activo_med: number | null; his_med: number | null; miracle_med: number | null; escritura_med: number | null; clics_med: number | null;
@@ -243,6 +248,7 @@ export type Medianas = {
   tabs_med: number | null; enters_med: number | null; correcciones_med: number | null; copias_med: number | null; pegados_med: number | null; guardados_med: number | null;
   interrupciones_med: number | null; revisitas_med: number | null; pacientes_por_hora_med: number | null; consulta_med: number | null;
   entre_consultas_med: number | null; carga_admin_med: number | null; bloqueado_med: number | null; inactivo_med: number | null; sin_datos_med: number | null; cobertura_med: number | null;
+  pre_med: number | null; cola_med: number | null;
 };
 
 export type Kpis = Medianas & { n: number };
@@ -390,6 +396,45 @@ export async function rutasSap(f: Filtros): Promise<FilaRuta[]> {
     select tcode as de, exit_to as a, count(*)::int as veces
     from sap_visits v where ${visitasEnRango(f)} and exit_to is not null and tcode <> '' and exit_to <> tcode
     group by tcode, exit_to order by count(*) desc limit 30`;
+}
+
+// ── Encuentros: lo que costó cada paciente ─────────────────────────────────
+
+export type Encuentro = {
+  device_id: string; dia_operativo: string; consultorio_id: string | null; consultorio: string | null; encounter_key: string; orden: number;
+  primera_vez: string; ultima_vez: string; consulta_ms: number; activo_ms: number; his_ms: number; miracle_ms: number;
+  typing_ms: number; keystrokes: number; clicks: number; tabs: number; enters: number; correcciones: number; copias: number; pegados: number; guardados: number;
+  tramos: number; post_atencion_ms: number; siguiente_ms: number | null; visitas: number; pantallas_distintas: number; sap_wait_ms: number; ready_ms_p50: number | null;
+  sap_user: string | null; medico: string | null;
+};
+
+export async function encuentrosDelDia(consultorioId: string, fecha: string): Promise<Encuentro[]> {
+  return sql<Encuentro[]>`
+    select e.*, e.dia_operativo::text as dia_operativo, c.nombre as consultorio, r.display_name as medico
+    from encuentros e left join consultorios c on c.id = e.consultorio_id left join roster r on r.id = medico_de(e.sap_user)
+    where e.consultorio_id = ${consultorioId}::uuid and e.dia_operativo = ${fecha}::date order by e.orden`;
+}
+
+export type DistribucionConsulta = {
+  n: number; p25: number | null; p50: number | null; p75: number | null; p90: number | null;
+  activo_p50: number | null; his_p50: number | null; post_p50: number | null; con_interrupcion: number;
+};
+
+/** La distribución de las consultas del rango (solo jornadas comparables): lo que cuesta un paciente. */
+export async function distribucionConsultas(f: Filtros): Promise<DistribucionConsulta> {
+  const [d] = await sql<DistribucionConsulta[]>`
+    select count(*)::int as n,
+      percentile_cont(0.25) within group (order by e.consulta_ms) as p25,
+      percentile_cont(0.5) within group (order by e.consulta_ms) as p50,
+      percentile_cont(0.75) within group (order by e.consulta_ms) as p75,
+      percentile_cont(0.9) within group (order by e.consulta_ms) as p90,
+      percentile_cont(0.5) within group (order by e.activo_ms) as activo_p50,
+      percentile_cont(0.5) within group (order by e.his_ms) as his_p50,
+      percentile_cont(0.5) within group (order by e.post_atencion_ms) as post_p50,
+      count(*) filter (where e.tramos > 1)::int as con_interrupcion
+    from encuentros e join jornada_summary j on j.device_id = e.device_id and j.dia_operativo = e.dia_operativo
+    where ${buenas(f)}`;
+  return d;
 }
 
 // ── Consultorios, dispositivos, roster, fases, ajustes ────────────────────

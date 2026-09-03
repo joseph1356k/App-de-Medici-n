@@ -96,6 +96,8 @@ export default async function ConsultorioDiaPage({ params, searchParams }: { par
             <Tile label="Bloqueado" value={fmtMin(tot.bloqueado)} sub="sesión de Windows bloqueada" />
             <Tile label="Sin datos" value={fmtMin(tot.sin_datos)} tono={tot.sin_datos > 0 ? "critico" : undefined} sub="huecos entre cubetas: PC apagado, suspendido o medidor caído" />
             <Tile label="Hasta el siguiente paciente" value={fmtMin(r?.entre_consultas_ms_mediana)} sub={r ? `post-atención ${fmtMin(r.post_atencion_ms)}` : undefined} />
+            <Tile label="Arranque del día" value={fmtMin(r?.pre_atencion_ms)} sub="activo antes de abrir al primer paciente" />
+            <Tile label="Cola de documentación" value={fmtMin(r?.cola_post_jornada_ms)} sub={r ? `en SAP tras abrir al último paciente · consulta p25–p75 ${fmtMin(r.consulta_ms_p25)} – ${fmtMin(r.consulta_ms_p75)}` : "en SAP tras abrir al último paciente"} />
           </div>
 
           <Seccion titulo={`Pacientes (${datos.pacientes.length})`} sub="Cada paciente es una huella irreversible calculada en el PC — nunca un nombre ni un documento. El P# es el mismo de las bandas de la línea de tiempo.">

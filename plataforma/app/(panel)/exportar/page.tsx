@@ -9,6 +9,7 @@ import { conFiltro, leerFiltros, type Sp } from "@/lib/filtros";
 // que esta página no se desfase de lo que de verdad se exporta.
 const DESCRIPCION: Record<Coleccion, { titulo: string; texto: string; formatos: string[] }> = {
   jornadas: { titulo: "Jornadas", texto: "Una fila por consultorio y día operativo con todas las métricas agregadas. La tabla principal para analizar; se abre en Excel.", formatos: ["csv", "json"] },
+  pacientes: { titulo: "Pacientes (consultas)", texto: "Una fila por paciente y jornada: cuánto costó cada consulta (duración, activo, SAP, tecleo, clics, pantallas, interrupciones, post-atención). El paciente es una huella, nunca un nombre.", formatos: ["csv", "json"] },
   muestras: { titulo: "Muestras de 15 s", texto: "La serie temporal cruda: una fila por cubeta de 15 s y contexto (app · pantalla · paciente · usuario SAP). Puede ser grande; se transmite en streaming.", formatos: ["ndjson", "csv"] },
   visitas: { titulo: "Visitas SAP", texto: "Una fila por pantalla visitada: transacción, estadía, time-to-ready, espera al servidor, siguiente pantalla.", formatos: ["csv", "json"] },
   eventos: { titulo: "Eventos", texto: "Arranques y caídas del medidor, bloqueos, suspensiones, pacientes abiertos y cerrados, calidad, asignación de consultorio.", formatos: ["csv", "json"] },
@@ -36,7 +37,7 @@ export default async function ExportarPage({ searchParams }: { searchParams: Pro
       <div className="grid gap-3 md:grid-cols-2">
         <a href={`/api/export/dataset.json${q}`} className="tarjeta block p-4 hover:border-accent md:col-span-2">
           <p className="font-medium text-ink">Dataset completo (JSON, para IA)</p>
-          <p className="mt-1 text-sm text-muted">Un solo archivo con _leeme, consultorios, fases, médicos (anotación), dispositivos, jornadas, visitas SAP y eventos del rango. Añade <code>&amp;muestras=1</code> para incluir la serie de 15 s.</p>
+          <p className="mt-1 text-sm text-muted">Un solo archivo con _leeme, consultorios, fases, médicos (anotación), dispositivos, jornadas, pacientes, visitas SAP y eventos del rango. Añade <code>&amp;muestras=1</code> para incluir la serie de 15 s.</p>
           <p className="mt-2 font-mono text-xs text-accent">/api/export/dataset.json{q}</p>
         </a>
         {colecciones.map((col) => (

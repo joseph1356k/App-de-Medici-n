@@ -122,11 +122,38 @@ do $$ declare ok boolean; j jornada_summary%rowtype; begin
   if j.primera_actividad <> timestamptz '2026-09-01 08:00:00-05' then raise exception 'primera_actividad: %', j.primera_actividad; end if;
   if j.ultima_actividad <> timestamptz '2026-09-01 08:00:00-05' + interval '6600 seconds' then raise exception 'ultima_actividad: %', j.ultima_actividad; end if;
   if j.sucia then raise exception 'el resumen recién hecho no puede estar sucio'; end if;
+  if j.algo_version <> 2 then raise exception 'algo_version: % (esperado 2)', j.algo_version; end if;
+  -- algo_version 2: arranque, cola, percentiles, por app y por hora
+  if j.pre_atencion_ms <> 0 then raise exception 'pre_atencion_ms: % (esperado 0: el primer paciente abre en la cubeta 0)', j.pre_atencion_ms; end if;
+  -- cola: sap activo después de abrir al último paciente (B, cubeta 120): 162 + 54 cubetas sap × 12000
+  if j.cola_post_jornada_ms <> 2592000 then raise exception 'cola_post_jornada_ms: % (esperado 2592000)', j.cola_post_jornada_ms; end if;
+  if j.consulta_ms_p25 <> 3000000 or j.consulta_ms_p75 <> 5400000 then raise exception 'consulta p25/p75: %/% (esperado 3000000/5400000)', j.consulta_ms_p25, j.consulta_ms_p75; end if;
+  if (j.por_hora->>'08')::bigint <> 2880000 then raise exception 'por_hora.08: % (esperado 2880000)', j.por_hora->>'08'; end if;
+  if (j.por_app->'sap'->>'typing_ms')::bigint <> 972000 then raise exception 'por_app.sap.typing_ms: % (esperado 972000)', j.por_app->'sap'->>'typing_ms'; end if;
+  if (j.por_app->'chrome'->>'clicks')::bigint <> 108 then raise exception 'por_app.chrome.clicks: % (esperado 108)', j.por_app->'chrome'->>'clicks'; end if;
 
   -- El acelerador: resumido hace un instante → no recomputa, marca sucio, devuelve false.
   select recompute_jornada('22222222-2222-2222-2222-222222222222', date '2026-09-01', interval '5 minutes') into ok;
   if ok then raise exception 'el acelerador no frenó'; end if;
   if not (select sucia from jornada_summary where device_id = '22222222-2222-2222-2222-222222222222' and dia_operativo = date '2026-09-01') then raise exception 'debía quedar sucia'; end if;
+end $$;
+
+-- Los encuentros: una fila por paciente, con lo que costó cada uno.
+--   A: cubetas 0..119, 240..299, 380..439 → activo 240 × 12000 = 2 880 000; sap 216 × 12000 = 2 592 000;
+--      consulta 6 600 000; 2 tramos; post-atención 120 × 12000 = 1 440 000; 1 visita; siguiente (A→B en 120) = 0
+--   B: cubetas 120..239 → activo 1 440 000; sap 108 × 12000 = 1 296 000; consulta 1 800 000; 1 tramo; siguiente (B→A en 240) = 0
+do $$ declare a encuentros%rowtype; b encuentros%rowtype; begin
+  if (select count(*) from encuentros where device_id = '22222222-2222-2222-2222-222222222222' and dia_operativo = date '2026-09-01') <> 2 then raise exception 'encuentros: debía haber 2'; end if;
+  select * into a from encuentros where device_id = '22222222-2222-2222-2222-222222222222' and dia_operativo = date '2026-09-01' and encounter_key = repeat('a', 32);
+  select * into b from encuentros where device_id = '22222222-2222-2222-2222-222222222222' and dia_operativo = date '2026-09-01' and encounter_key = repeat('b', 32);
+  if a.orden <> 1 or b.orden <> 2 then raise exception 'encuentros.orden: %/% (esperado 1/2)', a.orden, b.orden; end if;
+  if a.activo_ms <> 2880000 or a.his_ms <> 2592000 or a.consulta_ms <> 6600000 then raise exception 'encuentro A: activo % his % consulta %', a.activo_ms, a.his_ms, a.consulta_ms; end if;
+  if a.tramos <> 2 or a.post_atencion_ms <> 1440000 or a.visitas <> 1 or a.siguiente_ms <> 0 then raise exception 'encuentro A: tramos % post % visitas % siguiente %', a.tramos, a.post_atencion_ms, a.visitas, a.siguiente_ms; end if;
+  if b.activo_ms <> 1440000 or b.his_ms <> 1296000 or b.consulta_ms <> 1800000 or b.tramos <> 1 or b.post_atencion_ms <> 0 or b.siguiente_ms <> 0 then
+    raise exception 'encuentro B: activo % his % consulta % tramos % post % siguiente %', b.activo_ms, b.his_ms, b.consulta_ms, b.tramos, b.post_atencion_ms, b.siguiente_ms; end if;
+  if a.sap_user <> 'MED01' or a.typing_ms <> 648000 or a.keystrokes <> 4800 then raise exception 'encuentro A: sap_user % typing % teclas %', a.sap_user, a.typing_ms, a.keystrokes; end if;
+  if a.consultorio_id <> (select id from consultorios where nombre = 'Consultorio 1') then raise exception 'encuentro A sin consultorio'; end if;
+  if a.ready_ms_p50 <> 850 or b.ready_ms_p50 is not null then raise exception 'encuentros: ready_ms_p50 %/%', a.ready_ms_p50, b.ready_ms_p50; end if;
 end $$;
 
 -- Caso negativo: un tercer proceso descartó filas del spool → la jornada deja de ser comparable.
