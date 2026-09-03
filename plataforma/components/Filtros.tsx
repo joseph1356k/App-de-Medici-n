@@ -1,13 +1,13 @@
 // La fila de filtros: una sola, arriba de todo lo que filtra. Rango primero (presets
-// como enlaces), luego fase, médico y el interruptor de mala calidad en un form GET
-// sin JavaScript.
+// como enlaces), luego fase, consultorio y el interruptor de mala calidad en un form GET
+// sin JavaScript. Con `conFecha`, además un día concreto (`?fecha=`).
 import Link from "next/link";
-import { RANGOS, conFiltro, type Filtros as F } from "@/lib/filtros";
+import { RANGOS, conFiltro, hoyOperativo, type Filtros as F } from "@/lib/filtros";
 import { ETIQUETA_FASE, FASES } from "@/lib/formato";
 
-export function Filtros({ f, medicos, ruta = "" }: { f: F; medicos: { id: string; display_name: string }[]; ruta?: string }) {
+export function Filtros({ f, consultorios, ruta = "", conFecha = false, fecha }: { f: F; consultorios: { id: string; nombre: string }[]; ruta?: string; conFecha?: boolean; fecha?: string }) {
   return (
-    <div className="tarjeta flex flex-wrap items-center gap-3 px-4 py-3 text-sm">
+    <div className="tarjeta flex flex-wrap items-center gap-3 px-4 py-3 text-sm print:hidden">
       <div className="flex flex-wrap gap-1">
         {RANGOS.map((r) => (
           <Link key={r.id} href={ruta + conFiltro(f, { rango: r.id, desde: null, hasta: null, page: null })}
@@ -33,13 +33,13 @@ export function Filtros({ f, medicos, ruta = "" }: { f: F; medicos: { id: string
           <option value="todas">Todas las fases</option>
           {FASES.map((x) => <option key={x} value={x}>{ETIQUETA_FASE[x]}</option>)}
         </select>
-        <select name="medico" defaultValue={f.medico ?? "todos"} className="campo">
-          <option value="todos">Todos los médicos</option>
-          {medicos.map((m) => <option key={m.id} value={m.id}>{m.display_name}</option>)}
+        <select name="consultorio" defaultValue={f.consultorio ?? "todos"} className="campo">
+          <option value="todos">Todos los consultorios</option>
+          {consultorios.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
         </select>
-        {f.dispositivo && <input type="hidden" name="dispositivo" value={f.dispositivo} />}
+        {conFecha && <input type="date" name="fecha" defaultValue={fecha ?? hoyOperativo()} max={hoyOperativo()} className="campo" title="Un día concreto" />}
         <label className="inline-flex items-center gap-1.5 text-secondary">
-          <input type="checkbox" name="incluir_mala" value="1" defaultChecked={f.incluirMala} /> incluir turnos de mala calidad
+          <input type="checkbox" name="incluir_mala" value="1" defaultChecked={f.incluirMala} /> incluir jornadas de mala calidad
         </label>
         <button className="boton">Aplicar</button>
       </form>

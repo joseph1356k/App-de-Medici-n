@@ -23,7 +23,7 @@ async function probarBase(): Promise<{ ok: boolean; detalle: string }> {
     const [r] = await sql<{ hospital: string; tablas: number }[]>`
       select (select hospital from settings where id = 1) as hospital,
              (select count(*)::int from information_schema.tables
-               where table_name in ('settings','roster','devices','shifts','samples','events','sap_visits','shift_summary','study_phases')) as tablas`;
+               where table_name in ('settings','roster','devices','consultorios','jornadas','samples','events','sap_visits','jornada_summary','study_phases')) as tablas`;
     if (!r?.tablas) return { ok: false, detalle: "conecta, pero faltan las tablas: aplica supabase/schema.sql" };
     return { ok: true, detalle: `conecta · ${r.tablas} tablas · ${r.hospital ?? "sin nombre"}` };
   } catch (e) {
@@ -53,9 +53,15 @@ export default async function InstalacionPage() {
         </div>
 
         {listo ? (
-          <p className="text-sm text-secondary">
-            Todo en su sitio. <a href="/" className="text-accent underline">Ir al panel →</a>
-          </p>
+          <div className="text-sm text-secondary">
+            <p>Todo en su sitio. <a href="/" className="text-accent underline">Ir al panel →</a></p>
+            <p className="mt-4 font-medium text-ink">Después</p>
+            <ol className="mt-1 list-decimal space-y-1 pl-5">
+              <li>Instala <span className="font-mono">Medidor.exe</span> en el PC de cada consultorio (doble clic; se registra solo y se vigila a sí mismo).</li>
+              <li>En <a href="/dispositivos" className="text-accent underline">Dispositivos</a>, asigna cada PC a su consultorio: el icono del PC pasa de ámbar a verde en ≤ 2 min y la tarjeta aparece en Inicio.</li>
+              <li>Revisa el calendario de fases en <a href="/configuracion" className="text-accent underline">Configuración</a> (sin fases, todo cuenta como baseline).</li>
+            </ol>
+          </div>
         ) : (
           <p className="mb-5 text-sm text-secondary">
             La plataforma está desplegada, pero todavía no sabe dónde guardar los datos ni con qué

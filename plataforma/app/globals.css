@@ -35,6 +35,17 @@
   --color-s7: #4a3aa7;
   --color-s8: #e34948;
   --color-otro: #b5b3ab;
+
+  /* Los estados de la línea de tiempo, ordenados por luminancia (activo oscuro y saturado,
+     inactivo claro, bloqueado gris medio, sin datos gris claro rayado): se distinguen en
+     escala de grises y con deuteranopía. */
+  --color-estado-activo: #1f9d55;
+  --color-estado-inactivo: #e8dfc4;
+  --color-estado-bloqueado: #6b7a90;
+  --color-estado-sin-datos: #d9d8d2;
+  --color-ahora: #d03b3b;
+  --color-pac-a: #7c6bd9;
+  --color-pac-b: #2fb39a;
 }
 
 html { color-scheme: light; }
@@ -56,3 +67,39 @@ body { background: var(--color-plane); color: var(--color-ink); }
 .boton-primario:hover { opacity: 0.92; background: var(--color-accent); }
 .campo { border: 1px solid var(--color-line); border-radius: 0.5rem; padding: 0.375rem 0.625rem; font-size: 0.875rem; background: var(--color-surface); color: var(--color-ink); }
 .chip { display: inline-flex; align-items: center; gap: 0.25rem; border-radius: 999px; padding: 0.125rem 0.5rem; font-size: 0.75rem; font-weight: 500; }
+
+/* «Sin datos» se distingue por el rayado, no solo por el gris (leyenda, puntos, celdas). */
+.rayado, .punto-rayado { background-image: repeating-linear-gradient(135deg, transparent 0 3px, var(--color-surface) 3px 5px) !important; background-color: var(--color-estado-sin-datos) !important; }
+
+/* La línea de tiempo del día (components/LineaDeTiempoDia.tsx): un SVG que se estira a lo
+   ancho (solo rectángulos y líneas) y una capa HTML absoluta para todo lo que lleva texto,
+   colocada en % del ancho. Sin JavaScript. */
+.linea-dia { position: relative; }
+.linea-dia__lienzo { position: relative; }
+.linea-dia__marco { overflow-x: auto; }
+.linea-dia--completo .linea-dia__cuerpo { min-width: 640px; }
+.linea-dia__cuerpo { position: relative; }
+.linea-dia__svg { display: block; width: 100%; }
+.linea-dia__capa { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.linea-dia__capa > * { position: absolute; }
+.linea-dia__hora { transform: translateX(-50%); font-size: 10px; line-height: 1; color: var(--color-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.linea-dia__hora--inicio { transform: none; }
+.linea-dia__hora--fin { transform: translateX(-100%); }
+.linea-dia--mini .linea-dia__hora { font-size: 9px; }
+.linea-dia__pill { display: block; overflow: hidden; padding: 0 3px; font-size: 10px; font-weight: 600; line-height: 1; color: #fff; white-space: nowrap; text-overflow: clip; }
+.linea-dia__pill--tinta { color: var(--color-ink); font-weight: 500; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.linea-dia__glifo { transform: translateX(-50%); font-size: 11px; line-height: 1; color: var(--color-secondary); pointer-events: auto; cursor: default; white-space: nowrap; }
+.linea-dia__glifo sup { font-size: 8px; margin-left: 1px; }
+.linea-dia__ahora { transform: translateX(-50%); font-size: 9px; line-height: 1; font-weight: 600; color: var(--color-ahora); text-transform: uppercase; letter-spacing: 0.04em; }
+.linea-dia__gutter { position: absolute; left: 0; top: 0; bottom: 0; width: 72px; font-size: 11px; color: var(--color-muted); }
+.linea-dia__gutter > span { position: absolute; left: 0; right: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
+.linea-dia--completo .linea-dia__marco { margin-left: 72px; }
+.linea-dia__muestra { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: -1px; margin-right: 4px; }
+
+@media print {
+  .linea-dia__zoom, .print\:hidden { display: none !important; }
+  .linea-dia--completo .linea-dia__cuerpo { min-width: 0; }
+  .linea-dia__marco { overflow: visible; }
+  .tarjeta { break-inside: avoid; }
+  a { text-decoration: none; color: inherit; }
+}

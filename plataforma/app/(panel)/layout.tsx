@@ -1,13 +1,14 @@
 import Link from "next/link";
+import { NavEnlace } from "@/components/NavEnlace";
 import { ajustesDelPanel, faseHoy } from "@/lib/consultas";
 import { ETIQUETA_FASE } from "@/lib/formato";
 
 export const dynamic = "force-dynamic";
 
 const NAV = [
-  { href: "/", texto: "Resumen" },
-  { href: "/turnos", texto: "Turnos" },
-  { href: "/comparacion", texto: "Comparación de fases" },
+  { href: "/", texto: "Inicio", tambien: ["/consultorios"] },
+  { href: "/jornadas", texto: "Jornadas" },
+  { href: "/comparacion", texto: "Comparación" },
   { href: "/sap", texto: "Pantallas SAP" },
   { href: "/dispositivos", texto: "Dispositivos" },
   { href: "/configuracion", texto: "Configuración" },
@@ -33,10 +34,8 @@ export default async function PanelLayout({ children }: { children: React.ReactN
           <span className="chip border border-line bg-plane text-secondary" title="Fase del estudio vigente hoy, según el calendario de Configuración">
             Hoy: {ETIQUETA_FASE[fase] ?? fase}
           </span>
-          <nav className="flex flex-wrap gap-1 text-sm">
-            {NAV.map((n) => (
-              <Link key={n.href} href={n.href} className="rounded-lg px-3 py-1.5 text-secondary hover:bg-plane hover:text-ink">{n.texto}</Link>
-            ))}
+          <nav className="flex flex-wrap gap-1 text-sm print:hidden" aria-label="Secciones del panel">
+            {NAV.map((n) => <NavEnlace key={n.href} href={n.href} tambien={n.tambien}>{n.texto}</NavEnlace>)}
           </nav>
         </div>
       </header>

@@ -1,46 +1,60 @@
 import Link from "next/link";
-import { Seccion, Vacio } from "@/components/ui";
-import { dispositivos } from "@/lib/consultas";
-import { fmtNum, fmtRelativo } from "@/lib/formato";
-import { cambiarEstado, etiquetar } from "./actions";
+import { Insignia, Seccion, Vacio } from "@/components/ui";
+import { consultoriosParaFiltro, dispositivos } from "@/lib/consultas";
+import { etiquetaApp, fmtNum, fmtRelativo } from "@/lib/formato";
+import { asignarConsultorio, cambiarEstado } from "./actions";
 
 /**
- * DISPOSITIVOS: cada PC con el medidor. «Callado» = no late hace más de 20 min: el
- * medidor manda un latido cada minuto aunque el PC esté quieto, así que 20 minutos de
- * silencio es medidor muerto o PC apagado, no «nadie lo está usando».
+ * DISPOSITIVOS: cada PC con el medidor, y a qué consultorio pertenece. La asignación se
+ * hace AQUÍ (el PC no elige nada): al asignar, lo que ese PC mandó sin consultorio se
+ * completa hacia atrás. «Callado» = no late hace más de 20 min: el medidor manda un latido
+ * cada minuto aunque el PC esté quieto, así que 20 minutos de silencio es medidor muerto o
+ * PC apagado, no «nadie lo está usando».
  */
 export default async function DispositivosPage({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string }> }) {
   const sp = await searchParams;
-  const lista = await dispositivos();
+  const [lista, consultorios] = await Promise.all([dispositivos(), consultoriosParaFiltro()]);
   const ahora = Date.now();
   const callado = (d: { last_seen_at: string; status: string }) => d.status === "active" && ahora - new Date(d.last_seen_at).getTime() > 20 * 60 * 1000;
+  const sinAsignar = lista.filter((d) => d.status === "active" && !d.consultorio_id).length;
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-xl font-semibold text-ink">Dispositivos</h1>
-        <p className="text-sm text-muted">Los PCs con el medidor instalado. Se registran solos la primera vez que arrancan con la clave del servidor.</p>
+        <h1 className="text-2xl font-semibold tracking-tight text-ink">Dispositivos</h1>
+        <p className="text-sm text-muted">Los PCs con el medidor instalado. Se registran solos la primera vez que arrancan con la clave del servidor; aquí se les asigna su consultorio (el icono del PC lo muestra en ≤ 2 min).</p>
       </div>
       {sp.ok && <p className="rounded-lg bg-good-soft px-4 py-2 text-sm text-good-text">{sp.ok}</p>}
       {sp.error && <p className="rounded-lg bg-critical-soft px-4 py-2 text-sm text-critical">{sp.error}</p>}
+      {sinAsignar > 0 && <p className="rounded-lg bg-warning-soft px-4 py-2 text-sm text-ink">{sinAsignar === 1 ? "Hay un PC activo sin consultorio: mide, pero no aparece en Inicio hasta que se asigne." : `Hay ${sinAsignar} PCs activos sin consultorio: miden, pero no aparecen en Inicio hasta que se asignen.`}</p>}
 
       {lista.length === 0 ? (
-        <Vacio titulo="Ningún PC registrado todavía" texto="Instala el medidor en un PC (medidor/instalar.ps1 con la URL de este servidor y la clave). Aparecerá aquí en su primer latido." />
+        <Vacio titulo="Ningún PC registrado todavía" texto="Instala el medidor en un PC (doble clic en Medidor.exe, o medidor/instalar.ps1 con la URL de este servidor y la clave). Aparecerá aquí en su primer latido." />
       ) : (
         <Seccion titulo={`${lista.length} dispositivos`}>
           <div className="overflow-x-auto">
             <table className="tabla">
-              <thead><tr><th>PC</th><th>Etiqueta</th><th>Estado</th><th>Último latido</th><th>Última muestra</th><th>Turno en curso</th><th className="num">Turnos</th><th>Versión</th><th>Acciones</th></tr></thead>
+              <thead><tr><th>PC</th><th>Consultorio</th><th>Estado</th><th>Último latido</th><th>Última cubeta</th><th className="num">Jornadas</th><th>Versión</th><th>Acciones</th></tr></thead>
               <tbody>
                 {lista.map((d) => (
                   <tr key={d.id}>
-                    <td className="text-ink"><Link href={`/turnos?dispositivo=${d.id}&rango=todo`} className="hover:underline">{d.machine_name || "sin nombre"}</Link><br /><span className="text-xs text-muted">{d.os_version}</span></td>
+                    <td className="text-ink">
+                      {d.consultorio_id
+                        ? <Link href={`/consultorios/${d.consultorio_id}`} className="hover:underline">{d.machine_name || "sin nombre"}</Link>
+                        : <span>{d.machine_name || "sin nombre"}</span>}
+                      <br /><span className="text-xs text-muted">{d.os_version}</span>
+                    </td>
                     <td>
-                      <form action={etiquetar} className="flex gap-1">
+                      <form action={asignarConsultorio} className="flex items-center gap-1">
                         <input type="hidden" name="id" value={d.id} />
-                        <input name="label" defaultValue={d.label} placeholder="p. ej. consultorio 3" className="campo w-36" />
-                        <button className="boton">✓</button>
+                        <select name="consultorio" defaultValue={d.consultorio_id ?? ""} className="campo" aria-label={`Consultorio de ${d.machine_name}`}>
+                          <option value="">— sin consultorio —</option>
+                          {consultorios.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+                        </select>
+                        <button className="boton" title="Guardar la asignación">✓</button>
                       </form>
+                      {d.status === "active" && !d.consultorio_id && <Insignia tono="critico">sin consultorio</Insignia>}
+                      {d.consultorio_desde && d.consultorio_id && <span className="text-xs text-muted">desde {fmtRelativo(d.consultorio_desde)}</span>}
                     </td>
                     <td>
                       {d.status === "retired" ? <span className="chip bg-plane text-muted">retirado</span>
@@ -49,9 +63,8 @@ export default async function DispositivosPage({ searchParams }: { searchParams:
                         : <span className="chip bg-good-soft text-good-text">● activo</span>}
                     </td>
                     <td className="text-secondary">{fmtRelativo(d.last_seen_at)}</td>
-                    <td className="text-secondary">{fmtRelativo(d.last_sample_at)}</td>
-                    <td className="text-secondary">{d.turno_abierto ? <Link href={`/turnos/${d.turno_abierto}`} className="text-accent hover:underline">{d.medico_actual}</Link> : "—"}</td>
-                    <td className="num">{fmtNum(d.turnos)}</td>
+                    <td className="text-secondary">{fmtRelativo(d.ultima_cubeta ?? d.last_sample_at)}{d.ultima_app && <><br /><span className="text-xs text-muted">{etiquetaApp(d.ultima_app)}</span></>}</td>
+                    <td className="num">{fmtNum(d.jornadas)}</td>
                     <td className="text-secondary">{d.app_version || "—"}</td>
                     <td>
                       <div className="flex gap-1">
@@ -71,6 +84,6 @@ export default async function DispositivosPage({ searchParams }: { searchParams:
   );
 }
 
-// Un fallo tiene que verse en 30 s, no a los 300 que da Vercel por defecto: un giro
-// de cinco minutos no es información, es un cuelgue.
-export const maxDuration = 30;
+// 60 y no 30: la primera asignación de un consultorio completa hacia atrás todo lo que ese
+// PC mandó sin consultorio, y puede ser mucho.
+export const maxDuration = 60;

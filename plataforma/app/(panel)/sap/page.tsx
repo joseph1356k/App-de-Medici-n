@@ -1,7 +1,7 @@
 import { Filtros } from "@/components/Filtros";
 import { Barras } from "@/components/Barras";
 import { Seccion, Vacio } from "@/components/ui";
-import { medicosParaFiltro, pantallasSap, rutasSap, superficiesSap } from "@/lib/consultas";
+import { consultoriosParaFiltro, pantallasSap, rutasSap, superficiesSap } from "@/lib/consultas";
 import { leerFiltros, type Sp } from "@/lib/filtros";
 import { fmtNum, fmtSeg } from "@/lib/formato";
 
@@ -12,16 +12,16 @@ import { fmtNum, fmtSeg } from "@/lib/formato";
  */
 export default async function SapPage({ searchParams }: { searchParams: Promise<Sp> }) {
   const f = leerFiltros(await searchParams);
-  const [pantallas, superficies, rutas, medicos] = await Promise.all([pantallasSap(f), superficiesSap(f), rutasSap(f), medicosParaFiltro()]);
+  const [pantallas, superficies, rutas, consultorios] = await Promise.all([pantallasSap(f), superficiesSap(f), rutasSap(f), consultoriosParaFiltro()]);
   const totalVisitas = pantallas.reduce((s, p) => s + p.visitas, 0);
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-xl font-semibold text-ink">Pantallas SAP</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-ink">Pantallas SAP</h1>
         <p className="text-sm text-muted">Las transacciones y pantallas por las que pasan los médicos, con sus tiempos. Identidad técnica de la pantalla (SID/transacción/programa/dynpro), nunca su contenido.</p>
       </div>
-      <Filtros f={f} medicos={medicos} ruta="/sap" />
+      <Filtros f={f} consultorios={consultorios} ruta="/sap" />
 
       {pantallas.length === 0 ? (
         <Vacio titulo="Sin visitas SAP en el rango" texto="Las visitas necesitan SAP GUI Scripting habilitado en el PC (sapgui/user_scripting = TRUE). Sin él, el medidor cuenta el tiempo en SAP pero no ve las pantallas." />
@@ -37,14 +37,14 @@ export default async function SapPage({ searchParams }: { searchParams: Promise<
               <Seccion titulo="Tiempos por transacción" sub="Medianas por visita. «Lista en» = time-to-ready (llegada → primer fin de round-trip sin ocupado). «Espera» = suma de round-trips en la visita.">
                 <div className="overflow-x-auto">
                   <table className="tabla">
-                    <thead><tr><th>Transacción</th><th className="num">Visitas</th><th className="num">Turnos</th><th className="num">Pacientes</th><th className="num">Estadía</th><th className="num">Lista en p50</th><th className="num">p95</th><th className="num">Espera</th><th className="num">Round-trips</th></tr></thead>
+                    <thead><tr><th>Transacción</th><th className="num">Visitas</th><th className="num">Jornadas</th><th className="num">Pacientes</th><th className="num">Estadía</th><th className="num">Lista en p50</th><th className="num">p95</th><th className="num">Espera</th><th className="num">Round-trips</th></tr></thead>
                     <tbody>
                       {pantallas.map((p) => (
                         <tr key={p.tcode}>
                           <td className="font-mono text-xs text-ink">{p.tcode}</td>
                           <td className="num">{fmtNum(p.visitas)}</td>
-                          <td className="num">{fmtNum(p.turnos)}</td>
-                          <td className="num">{fmtNum(p.encounters)}</td>
+                          <td className="num">{fmtNum(p.jornadas)}</td>
+                          <td className="num">{fmtNum(p.pacientes)}</td>
                           <td className="num">{fmtSeg(p.dwell_med)}</td>
                           <td className="num">{fmtSeg(p.ready_p50)}</td>
                           <td className="num">{fmtSeg(p.ready_p95)}</td>

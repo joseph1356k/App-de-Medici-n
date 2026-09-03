@@ -1,5 +1,5 @@
 // GET /api/export/<coleccion>.<csv|json|ndjson> · /api/export/dataset.json · /api/export/esquema.json
-// Con los mismos filtros de la URL que el panel (rango, fase, medico, dispositivo,
+// Con los mismos filtros de la URL que el panel (rango, fase, consultorio, dispositivo,
 // incluir_mala). Sin barrera: el panel es público (ver middleware.ts).
 import { NextResponse } from "next/server";
 import { leerFiltros, type Sp } from "@/lib/filtros";
@@ -8,12 +8,12 @@ import { COLUMNAS, aStream, csv, dataset, json, ndjson, type Coleccion } from "@
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 export async function GET(req: Request, { params }: { params: Promise<{ archivo: string }> }) {
   const { archivo } = await params;
   const m = archivo.match(/^([a-z_]+)\.(csv|json|ndjson)$/);
-  if (!m) return NextResponse.json({ error: "Archivo desconocido. Usa turnos|muestras|visitas|eventos .csv|.json|.ndjson, dataset.json o esquema.json" }, { status: 404 });
+  if (!m) return NextResponse.json({ error: "Archivo desconocido. Usa jornadas|muestras|visitas|eventos .csv|.json|.ndjson, dataset.json o esquema.json" }, { status: 404 });
   const [, nombre, ext] = m;
   const sp = Object.fromEntries(new URL(req.url).searchParams.entries()) as Sp;
   const f = leerFiltros(sp);
