@@ -193,6 +193,8 @@ public sealed class SapGui
     ///     trabajo, no interrumpirlo.
     /// </summary>
     private int _rechazos;
+    private DateTime _engancheEn = DateTime.MinValue;
+    private int _perdidasSeguidas;
 
     private object? Motor(bool puedeEngancharse = true)
     {
@@ -217,6 +219,7 @@ public sealed class SapGui
                 if (_rechazos > 0) Registro.Anota("sap", $"enganchado al motor de scripting tras {_rechazos} negativa(s)");
                 else Registro.Anota("sap", "enganchado al motor de scripting");
                 _rechazos = 0;
+                _engancheEn = DateTime.UtcNow;
                 return _motor;
             }
         }
@@ -285,8 +288,15 @@ public sealed class SapGui
         _idSesionConEventos = "";
         _motor = null;
         _ultimaSesion = null;
-        // 30 s, no 5: si SAP se cerró, reenganchar en cuanto vuelva saca OTRO aviso al médico.
-        _proximoIntento = DateTime.UtcNow.AddSeconds(RitmoDeEnganche.TrasPerderElMotorS);
+        // 30 s, no 5: si SAP se cerró, reenganchar en cuanto vuelva saca OTRO aviso al médico. Y si
+        // el motor se está cayendo en cadena, la espera crece como con una negativa: un SAP
+        // inestable no puede acabar sacando un cuadro cada treinta segundos toda la tarde.
+        var sostenido = _engancheEn == DateTime.MinValue ? 0 : (int)(DateTime.UtcNow - _engancheEn).TotalSeconds;
+        _perdidasSeguidas = sostenido >= RitmoDeEnganche.EngancheEstableS ? 0 : _perdidasSeguidas + 1;
+        var espera = RitmoDeEnganche.EsperaTrasPerderElMotorS(sostenido, _perdidasSeguidas - 1);
+        _engancheEn = DateTime.MinValue;
+        _proximoIntento = DateTime.UtcNow.AddSeconds(espera);
+        if (_perdidasSeguidas > 1) Registro.Anota("sap", $"el motor no se sostiene ({_perdidasSeguidas} caídas seguidas); siguiente intento en {espera} s");
     }
 
     private static string Relativo(string selector)

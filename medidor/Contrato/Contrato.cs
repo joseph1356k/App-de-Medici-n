@@ -924,6 +924,14 @@ internal static class Contrato
         // Que SAP no esté abierto no es una negativa: nadie vio un cuadro y reintentar es barato.
         Debe(RitmoDeEnganche.SinSapS <= 15, "sin SAP abierto se reintenta pronto, que eso no molesta a nadie");
         Debe(RitmoDeEnganche.TrasPerderElMotorS >= 30, "y perder el motor tampoco se reengancha al instante");
+
+        // Perder el motor tras una mañana entera es SAP cerrándose: se reengancha pronto.
+        Debe(RitmoDeEnganche.EsperaTrasPerderElMotorS(4 * 3600, 0) == RitmoDeEnganche.TrasPerderElMotorS,
+            "un motor que aguantó horas se reengancha pronto: eso es SAP cerrándose, no un problema");
+        // Pero un motor que se cae cada pocos segundos, en cadena, sí espacia el aviso.
+        var caidas = new[] { 0, 1, 2, 3, 9 }.Select(n => RitmoDeEnganche.EsperaTrasPerderElMotorS(5, n)).ToArray();
+        Debe(caidas.Zip(caidas.Skip(1)).All(p => p.Second >= p.First) && caidas[^1] >= 1800,
+            "y uno que se cae en cadena espacia el reintento igual que una negativa");
     }
 
     private static void LosDos403SeDistinguen()

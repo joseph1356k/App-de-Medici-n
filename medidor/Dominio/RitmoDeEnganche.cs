@@ -30,6 +30,21 @@ public static class RitmoDeEnganche
     /// así que tampoco es cosa de cinco segundos.</summary>
     public const int TrasPerderElMotorS = 30;
 
+    /// <summary>A partir de aquí, un enganche se considera que FUNCIONÓ. Perder el motor tras una
+    /// mañana entera midiendo es SAP cerrándose, y reenganchar en 30 s es lo correcto; perderlo a
+    /// los diez segundos, una y otra vez, es un motor que no se sostiene — y cada reintento le
+    /// pone otro cuadro delante al médico.</summary>
+    public const int EngancheEstableS = 120;
+
+    /// <summary>Cuánto esperar tras perder el motor. Si se sostuvo un rato, se reengancha pronto;
+    /// si se está cayendo en cadena, se usa la misma escalera que una negativa, para que un SAP
+    /// inestable no acabe sacando un aviso cada treinta segundos toda la tarde.</summary>
+    public static int EsperaTrasPerderElMotorS(int segundosEnganchado, int perdidasSeguidas)
+    {
+        if (segundosEnganchado >= EngancheEstableS) return TrasPerderElMotorS;
+        return Math.Max(TrasPerderElMotorS, EsperaTrasRechazoS(perdidasSeguidas));
+    }
+
     /// <summary>La escalera tras cada negativa, en segundos. La última se repite para siempre.</summary>
     public static readonly int[] TrasRechazoS = { 60, 300, 900, 1800 };
 
