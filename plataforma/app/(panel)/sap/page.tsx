@@ -1,7 +1,7 @@
 import { Filtros } from "@/components/Filtros";
 import { Barras } from "@/components/graficos/Barras";
 import { Interactivo } from "@/components/graficos/Interactivo";
-import { Seccion, Vacio } from "@/components/ui";
+import { CabeceraPagina, Seccion, Vacio } from "@/components/ui";
 import { consultoriosParaFiltro, pantallasSap, rutasSap, superficiesSap } from "@/lib/consultas";
 import { leerFiltros, type Sp } from "@/lib/filtros";
 import { fmtNum, fmtSeg } from "@/lib/formato";
@@ -18,10 +18,8 @@ export default async function SapPage({ searchParams }: { searchParams: Promise<
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="titulo-pagina">Pantallas SAP</h1>
-        <p className="sub-pagina">Las transacciones y pantallas por las que pasan los médicos, con sus tiempos. Identidad técnica de la pantalla (SID/transacción/programa/dynpro), nunca su contenido.</p>
-      </div>
+      <CabeceraPagina eyebrow="Detalle" titulo="Pantallas SAP"
+        sub="Las transacciones y pantallas por las que pasan los médicos, con sus tiempos. Identidad técnica de la pantalla (SID/transacción/programa/dynpro), nunca su contenido." />
       <Filtros f={f} consultorios={consultorios} ruta="/sap" />
 
       {pantallas.length === 0 ? (

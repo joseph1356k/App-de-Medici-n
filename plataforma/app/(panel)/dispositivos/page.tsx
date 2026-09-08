@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Insignia, Seccion, Vacio } from "@/components/ui";
+import { CabeceraPagina, Insignia, Seccion, Vacio } from "@/components/ui";
 import { consultoriosParaFiltro, dispositivos } from "@/lib/consultas";
 import { etiquetaApp, fmtNum, fmtRelativo } from "@/lib/formato";
 import { asignarConsultorio, cambiarEstado } from "./actions";
@@ -20,10 +20,8 @@ export default async function DispositivosPage({ searchParams }: { searchParams:
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="titulo-pagina">Dispositivos</h1>
-        <p className="sub-pagina">Los PCs con el medidor instalado. Se registran solos la primera vez que arrancan con la clave del servidor; aquí se les asigna su consultorio (el icono del PC lo muestra en ≤ 2 min).</p>
-      </div>
+      <CabeceraPagina eyebrow="Operación" titulo="Dispositivos"
+        sub="Los PCs con el medidor instalado. Se registran solos la primera vez que arrancan con la clave del servidor; aquí se les asigna su consultorio (el icono del PC lo muestra en ≤ 2 min)." />
       {sp.ok && <p className="rounded-lg bg-good-soft px-4 py-2 text-sm text-good-text">{sp.ok}</p>}
       {sp.error && <p className="rounded-lg bg-critical-soft px-4 py-2 text-sm text-critical">{sp.error}</p>}
       {sinAsignar > 0 && <p className="rounded-lg bg-warning-soft px-4 py-2 text-sm text-ink">{sinAsignar === 1 ? "Hay un PC activo sin consultorio: mide, pero no aparece en Inicio hasta que se asigne." : `Hay ${sinAsignar} PCs activos sin consultorio: miden, pero no aparecen en Inicio hasta que se asignen.`}</p>}

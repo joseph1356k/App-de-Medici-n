@@ -1,5 +1,5 @@
 import { Filtros } from "@/components/Filtros";
-import { Seccion, Vacio } from "@/components/ui";
+import { CabeceraPagina, Seccion, Vacio } from "@/components/ui";
 import { consultoriosParaFiltro, porConsultorioYFase, porFase, type FilaFase, type Medianas } from "@/lib/consultas";
 import { leerFiltros, type Sp } from "@/lib/filtros";
 import { ETIQUETA_FASE, FASES, fmtMin, fmtNum, fmtPct, fmtSeg, reduccion } from "@/lib/formato";
@@ -59,10 +59,8 @@ export default async function ComparacionPage({ searchParams }: { searchParams: 
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="titulo-pagina">Comparación de fases</h1>
-        <p className="sub-pagina">Antes de Miracle, con Miracle Notes, y con Notes + Operations — la misma vara para las tres. Medianas por jornada, solo jornadas de buena calidad.</p>
-      </div>
+      <CabeceraPagina eyebrow="Estudio" titulo="Comparación de fases"
+        sub="Antes de Miracle, con Miracle Notes, y con Notes + Operations — la misma vara para las tres. Medianas por jornada, solo jornadas de buena calidad." />
       <Filtros f={f} consultorios={consultorios} ruta="/comparacion" />
 
       {fases.length === 0 ? (

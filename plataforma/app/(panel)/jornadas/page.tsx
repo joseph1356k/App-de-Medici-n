@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Filtros } from "@/components/Filtros";
-import { Calidad, ChipFase, Paginador, Seccion, Vacio } from "@/components/ui";
+import { CabeceraPagina, Calidad, ChipFase, Paginador, Seccion, Vacio } from "@/components/ui";
 import { consultoriosParaFiltro, jornadas } from "@/lib/consultas";
 import { conFiltro, leerFiltros, type Sp } from "@/lib/filtros";
 import { fmtFecha, fmtHora, fmtMin, fmtNum, fmtPct, fmtSeg } from "@/lib/formato";
@@ -20,10 +20,8 @@ export default async function JornadasPage({ searchParams }: { searchParams: Pro
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="titulo-pagina">Jornadas</h1>
-        <p className="sub-pagina">Una jornada = un consultorio en un día operativo (corte 06:00). El horario es de la primera a la última cubeta con actividad.</p>
-      </div>
+      <CabeceraPagina eyebrow="Registro" titulo="Jornadas"
+        sub="Una jornada = un consultorio en un día operativo (corte 06:00). El horario es de la primera a la última cubeta con actividad." />
       <Filtros f={f} consultorios={consultorios} ruta="/jornadas" />
       {total === 0 ? (
         <Vacio titulo="Sin jornadas" texto="No hay jornadas con estos filtros. Una jornada aparece a los pocos minutos de que un PC empiece a mandar cubetas." />

@@ -1,7 +1,7 @@
 import { AutoRefresco } from "@/components/AutoRefresco";
 import { RejillaCalor } from "@/components/RejillaCalor";
 import { TarjetaConsultorio } from "@/components/TarjetaConsultorio";
-import { Seccion, Vacio } from "@/components/ui";
+import { CabeceraPagina, Seccion, Vacio } from "@/components/ui";
 import { estadoConsultorios, lineaDeTiempoDia, serieDiaria } from "@/lib/consultas";
 import { hoyOperativo, leerFiltros, sumarDias } from "@/lib/filtros";
 import { fmtFecha } from "@/lib/formato";
@@ -30,13 +30,12 @@ export default async function InicioPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-2">
-        <div>
-          <h1 className="titulo-pagina">Consultorios, ahora</h1>
-          <p className="sub-pagina">Qué pasa en cada PC en este momento y cómo va el día operativo del {fmtFecha(hoy)} (corte 06:00). Tiempo, escritura, clics, pantallas y esperas: nunca contenido clínico.</p>
-        </div>
-        <AutoRefresco ahora={ahora} />
-      </div>
+      <CabeceraPagina
+        eyebrow={`Día operativo del ${fmtFecha(hoy)}`}
+        titulo="Consultorios, ahora"
+        sub="Qué pasa en cada PC en este momento y cómo va el día (corte 06:00). Tiempo, escritura, clics, pantallas y esperas: nunca contenido clínico."
+        acciones={<AutoRefresco ahora={ahora} />}
+      />
 
       {estados.length === 0 ? (
         <Vacio titulo="No hay consultorios activos" texto="Crea los consultorios en Configuración y asigna cada PC al suyo en Dispositivos. Las tarjetas aparecen aquí a un minuto del terreno." />

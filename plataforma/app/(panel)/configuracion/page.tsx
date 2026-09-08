@@ -1,4 +1,4 @@
-import { Seccion } from "@/components/ui";
+import { CabeceraPagina, Seccion } from "@/components/ui";
 import { ajustesDelPanel, consultorios, fasesDelEstudio, formasDeTitulo, roster } from "@/lib/consultas";
 import { ETIQUETA_FASE, FASES, fmtFecha, fmtNum, fmtRelativo } from "@/lib/formato";
 import { borrarFase, fijarFase, guardarConfig, guardarConsultorio, guardarHospital, guardarRoster } from "./actions";
@@ -19,10 +19,8 @@ export default async function ConfiguracionPage({ searchParams }: { searchParams
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="titulo-pagina">Configuración</h1>
-        <p className="sub-pagina">Todo lo de aquí llega a los PCs en su siguiente latido (un minuto). No hay que reinstalar nada.</p>
-      </div>
+      <CabeceraPagina eyebrow="Ajustes" titulo="Configuración"
+        sub="Todo lo de aquí llega a los PCs en su siguiente latido (un minuto). No hay que reinstalar nada." />
       {sp.ok && <p className="rounded-lg bg-good-soft px-4 py-2 text-sm text-good-text">{sp.ok}</p>}
       {sp.error && <p className="rounded-lg bg-critical-soft px-4 py-2 text-sm text-critical">{sp.error}</p>}
 

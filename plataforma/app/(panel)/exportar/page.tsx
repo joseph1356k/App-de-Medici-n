@@ -1,5 +1,5 @@
 import { Filtros } from "@/components/Filtros";
-import { Seccion } from "@/components/ui";
+import { CabeceraPagina, Seccion } from "@/components/ui";
 import { consultoriosParaFiltro } from "@/lib/consultas";
 import { DICCIONARIO } from "@/lib/diccionario";
 import { COLUMNAS, type Coleccion } from "@/lib/exportar";
@@ -28,10 +28,8 @@ export default async function ExportarPage({ searchParams }: { searchParams: Pro
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="titulo-pagina">Exportar</h1>
-        <p className="sub-pagina">Todos los datos del rango y consultorio elegidos. Sin contenido clínico: los pacientes son huellas, las pantallas son identidades técnicas, del tecleo solo hay cantidades.</p>
-      </div>
+      <CabeceraPagina eyebrow="Salida" titulo="Exportar"
+        sub="Todos los datos del rango y consultorio elegidos. Sin contenido clínico: los pacientes son huellas, las pantallas son identidades técnicas, del tecleo solo hay cantidades." />
       <Filtros f={f} consultorios={consultorios} ruta="/exportar" />
 
       <div className="grid gap-3 md:grid-cols-2">

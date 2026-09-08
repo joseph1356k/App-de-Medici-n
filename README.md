@@ -80,11 +80,22 @@ Detalles, requisitos de SAP y diagnóstico: [`docs/INSTALAR.md`](docs/INSTALAR.m
 - **Inicio**: los tres consultorios ahora mismo (activo, inactivo, bloqueado o sin datos; qué app y qué
   pantalla de SAP; pacientes de hoy; alertas del instrumento) con la línea de tiempo del día en miniatura,
   y la rejilla de los últimos 7 días.
-- **Día del consultorio**: la línea de tiempo completa (estado · app · SAP · pacientes · eventos), los
-  indicadores de la jornada, los médicos vistos por su usuario SAP, los pacientes (huellas), el recorrido
-  por SAP pantalla a pantalla, la calidad del instrumento.
+- **Tablero**: el rango contado con gráficos — los titulares con su tendencia y el cambio frente al periodo
+  anterior, el día típico por horas, los tres consultorios contra la mediana del conjunto, el reparto por
+  app, la distribución de la espera de SAP y el día a día. Todos los gráficos responden al ratón y al
+  teclado, y cada uno lleva su tabla («ver tabla») que se abre sola al imprimir: ningún número vive solo
+  dentro de un globo.
+- **Datos**: los mismos números en crudo — las 31 medianas de cada consultorio, cada jornada suelta, cada
+  app y cada usuario de SAP — para comprobar una cifra o copiarla. El Tablero es para mirar; Datos, para
+  verificar.
+- **Día del consultorio**: la línea de tiempo completa (estado · app · SAP · pacientes · eventos), las
+  cifras del día en cuatro niveles (lo que resume el día, lo importante, la actividad al detalle y lo que
+  todavía no se puede medir, con su motivo), la forma del día por horas, el reparto por app, los médicos
+  vistos por su usuario SAP, los pacientes (huellas), el recorrido por SAP pantalla a pantalla y la calidad
+  del instrumento.
 - **Jornadas**: la tabla consultorio × día. **Comparación**: baseline vs Notes vs Notes+Ops por
-  consultorio. **Pantallas SAP**: transacciones, tiempos y rutas. **Dispositivos**, **Configuración** y
+  consultorio. **Pantallas SAP**: transacciones, tiempos y rutas. **Dispositivos**, **Configuración**
+  (incluida la **identidad del paciente**, donde se lee la forma del título de SAP y se escribe la regla) y
   **Exportar**.
 
 ## Exportación lista para IA
