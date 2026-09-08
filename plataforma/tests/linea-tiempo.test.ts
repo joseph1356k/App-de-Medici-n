@@ -208,17 +208,17 @@ describe("ventanaDesdeQuery", () => {
 // eventos escribiendo «×16 ×9 ×7 ×2010» encima de sí mismo.
 
 describe("carriles", () => {
-  it("mini mide 48 px pase lo que pase: su tamaño lo manda la tarjeta, no la URL", () => {
-    for (const d of DETALLES) expect(carriles("mini", d).alto).toBe(48);
+  it("mini mide 52 px pase lo que pase: su tamaño lo manda la tarjeta, no la URL", () => {
+    for (const d of DETALLES) expect(carriles("mini", d).alto).toBe(52);
     expect(carriles("mini").ids).toEqual(["estado", "app"]);
   });
 
   it("el detalle escala alturas y huecos: ajustado < cómodo < amplio", () => {
     const a = carriles("completo", "ajustado"), c = carriles("completo", "comodo"), g = carriles("completo", "amplio");
-    expect([a.alto, c.alto, g.alto]).toEqual([139, 183, 244]);
-    expect(a.c.estado.alto).toBe(25);   // 22 × 1,15
-    expect(c.c.estado.alto).toBe(33);   // 22 × 1,5
-    expect(g.c.estado.alto).toBe(44);   // 22 × 2
+    expect([a.alto, c.alto, g.alto]).toEqual([176, 228, 304]);
+    expect(a.c.estado.alto).toBe(35);   // 30 × 1,15
+    expect(c.c.estado.alto).toBe(45);   // 30 × 1,5
+    expect(g.c.estado.alto).toBe(60);   // 30 × 2
     // los carriles nunca se solapan y van en orden
     for (const { c: k, ids } of [a, c, g]) {
       for (let i = 1; i < ids.length; i++) expect(k[ids[i]].y).toBeGreaterThanOrEqual(k[ids[i - 1]].y + k[ids[i - 1]].alto);
@@ -230,10 +230,10 @@ describe("carriles", () => {
     expect(k.ids).toEqual(["estado", "app", "eventos"]);
     expect(k.c.sap).toBeUndefined();
     expect(k.c.pacientes).toBeUndefined();
-    expect(k.alto).toBe(123);
+    expect(k.alto).toBe(150);
     expect(k.alto).toBeLessThan(carriles("completo", "comodo").alto);
     // el que queda sigue pegado a los de arriba: el gutter se alinea solo
-    expect(k.c.eventos.y).toBe(k.c.app.y + k.c.app.alto + 3);
+    expect(k.c.eventos.y).toBe(k.c.app.y + k.c.app.alto + 6);
   });
 
   it("el mínimo para escribir un glifo BAJA cuando el lienzo se ensancha", () => {

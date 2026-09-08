@@ -35,13 +35,13 @@ describe("LineaDeTiempoDia", () => {
     expect(html).toContain("var(--color-estado-bloqueado)");
   });
 
-  it("mini: solo Estado y App, 48 px, sin enlaces ni carril SAP ni marca de ayer", () => {
+  it("mini: solo Estado y App, 52 px, sin enlaces ni carril SAP ni marca de ayer", () => {
     const html = renderToStaticMarkup(<LineaDeTiempoDia datos={dia()} modo="mini" ahora={iso(hora("12:00") + 3 * 24 * 3_600_000)} />);
     expect(html).not.toMatch(/NaN|undefined/);
     expect(html).not.toContain("<a ");
     expect(html).not.toContain(">SAP<");
     expect(html).not.toContain(">P1<");
-    expect(html).toContain('viewBox="0 0 1000 48"');
+    expect(html).toContain('viewBox="0 0 1000 52"');
     expect(html).not.toContain('stroke="var(--color-ahora)"');
   });
 
@@ -56,9 +56,9 @@ describe("LineaDeTiempoDia", () => {
     const comodo = renderToStaticMarkup(<LineaDeTiempoDia datos={dia()} ahora={iso(hora("12:00"))} />);
     const amplio = renderToStaticMarkup(<LineaDeTiempoDia datos={dia()} detalle="amplio" ahora={iso(hora("12:00"))} />);
     for (const html of [ajustado, comodo, amplio]) expect(html).not.toMatch(/NaN|undefined/);
-    expect(ajustado).toContain('viewBox="0 0 1000 139"');
-    expect(comodo).toContain('viewBox="0 0 1000 183"');   // el defecto, sin pasar detalle
-    expect(amplio).toContain('viewBox="0 0 1000 244"');
+    expect(ajustado).toContain('viewBox="0 0 1000 176"');
+    expect(comodo).toContain('viewBox="0 0 1000 228"');   // el defecto, sin pasar detalle
+    expect(amplio).toContain('viewBox="0 0 1000 304"');
     // el ancho intrínseco: 1×, 2× y 4× el del contenedor (con su propia barra)
     expect(ajustado).toContain("max(640px, 100%)");
     expect(comodo).toContain("max(640px, 200%)");

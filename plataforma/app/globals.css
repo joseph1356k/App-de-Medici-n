@@ -153,7 +153,11 @@ body { background: var(--color-plane); color: var(--color-ink); }
    colocada en % del ancho. Sin JavaScript. */
 .linea-dia { position: relative; }
 .linea-dia__lienzo { position: relative; }
-.linea-dia__marco { overflow-x: auto; }
+.linea-dia__marco { overflow-x: auto; border-radius: 0.5rem; }
+/* La franja de cada carril se redondea por recorte del contenedor, no con `rx` en el SVG:
+   el lienzo se estira solo en X (preserveAspectRatio="none"), así que un radio dentro del
+   SVG saldría ovalado. */
+.linea-dia--completo .linea-dia__lienzo { padding: 2px 0; }
 .linea-dia--completo .linea-dia__cuerpo { min-width: 640px; }
 .linea-dia__cuerpo { position: relative; }
 .linea-dia__svg { display: block; width: 100%; }
@@ -177,10 +181,11 @@ body { background: var(--color-plane); color: var(--color-ink); }
 .linea-dia__glifo--ancho { transform: none; display: flex; align-items: baseline; gap: 3px; overflow: hidden; padding-right: 6px; }
 .linea-dia__glifo--ancho i { font-style: normal; font-size: 9px; color: var(--color-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .linea-dia__ahora { transform: translateX(-50%); font-size: 9px; line-height: 1; font-weight: 600; color: var(--color-ahora); text-transform: uppercase; letter-spacing: 0.04em; }
-.linea-dia__gutter { position: absolute; left: 0; top: 0; bottom: 0; width: 72px; font-size: 11px; color: var(--color-muted); }
+.linea-dia__gutter { position: absolute; left: 0; top: 0; bottom: 0; width: 76px; font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-muted); }
 .linea-dia__gutter > span { position: absolute; left: 0; right: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
-.linea-dia--completo .linea-dia__marco { margin-left: 72px; }
+.linea-dia--completo .linea-dia__marco { margin-left: 76px; }
 .linea-dia__muestra { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: -1px; margin-right: 4px; }
+.linea-dia--completo > div:last-child { margin-top: 0.75rem; padding-top: 0.625rem; border-top: 1px solid var(--color-line); }
 
 /* ── El kit de gráficos ───────────────────────────────────────────────────────
    Un solo envoltorio cliente (components/graficos/Interactivo.tsx) pone la cruceta y el globo

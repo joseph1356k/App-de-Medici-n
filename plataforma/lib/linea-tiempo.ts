@@ -310,8 +310,8 @@ export type Carriles = { c: Record<string, Carril>; alto: number; ids: string[] 
 
 /** Las alturas base en píxeles del viewBox (el eje Y NO se estira: solo X). */
 const CARRILES_BASE: Record<"completo" | "mini", [string, number][]> = {
-  completo: [["eje", 18], ["estado", 22], ["app", 22], ["sap", 18], ["pacientes", 18], ["eventos", 16]],
-  mini: [["eje", 12], ["estado", 18], ["app", 18]],
+  completo: [["eje", 16], ["estado", 30], ["app", 26], ["sap", 22], ["pacientes", 22], ["eventos", 20]],
+  mini: [["eje", 12], ["estado", 20], ["app", 20]],
 };
 
 /**
@@ -329,7 +329,9 @@ export function carriles(
   const k = completo ? MEDIDAS[detalle].alto : 1;
   const orden = CARRILES_BASE[modo].filter(([id]) =>
     id === "sap" ? hay.sap !== false : id === "pacientes" ? hay.pacientes !== false : true);
-  const hueco = completo ? Math.round(2 * k) : 0;
+  // Más aire entre carriles: cada banda tiene que leerse como una franja propia y no como
+  // parte de un bloque rayado. Es la diferencia entre «se entiende» y «hay que descifrarlo».
+  const hueco = completo ? Math.round(4 * k) : 0;
   const c: Record<string, Carril> = {};
   let y = 0;
   orden.forEach(([id, alto], i) => { if (i > 1) y += hueco; c[id] = { y, alto: Math.round(alto * k) }; y += c[id].alto; });

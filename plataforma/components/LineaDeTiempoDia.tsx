@@ -12,6 +12,7 @@
 // del contenedor, al doble (con su propia barra de desplazamiento) o al cuádruple con las
 // etiquetas de los eventos escritas. Ancho y alto crecen juntos, y la capa HTML sigue
 // colocándose en % del mismo lienzo, así que nunca se desalinea.
+import { Interactivo } from "@/components/graficos/Interactivo";
 import type { LineaDeTiempoDia as Datos, VisitaSap } from "@/lib/consultas";
 import type { Estado, Marca } from "@/lib/segmentos";
 import {
@@ -66,7 +67,9 @@ export function LineaDeTiempoDia({ datos, modo = "completo", ventana, ahora, zoo
   const esHoy = ahoraMs >= dia.desde && ahoraMs < dia.hasta;
   const pid = `sin-datos-${datos.consultorio.id.slice(0, 8)}-${modo}`;
 
-  const visibles = topApps(datos.segmentos, 7);
+  // Cinco apps y el resto en gris. Con siete el carril se volvía confeti: siete colores
+  // seguidos en franjas de dos píxeles no se distinguen, solo hacen ruido.
+  const visibles = topApps(datos.segmentos, 5);
   const estado = tramosEstado(datos.segmentos, esc);
   const appActiva = tramosApp(datos.segmentos, esc, visibles, ["activo"]);
   const appInactiva = tramosApp(datos.segmentos, esc, visibles, ["inactivo"]);
@@ -101,14 +104,22 @@ export function LineaDeTiempoDia({ datos, modo = "completo", ventana, ahora, zoo
     return p ? `${base} · consulta ${fmtMin(p.consulta_ms)} · activo ${fmtMin(p.activo_ms)} · ${p.visitas} visitas SAP · ${p.tramos} tramo${p.tramos === 1 ? "" : "s"}${textoMezcla(t, (k) => `P${pac?.indice[k] ?? "?"}`)}` : base;
   };
 
-  const rect = (t: Tramo, carril: Carril, fill: string, titulo: string, extra: Record<string, unknown> = {}) => (
-    <rect key={`${t.t0}-${t.clave}`} x={t.x0} y={carril.y} width={Math.max(0, t.x1 - t.x0)} height={carril.alto} fill={fill} {...extra}>
+  /**
+   * Cada tramo lleva el globo puesto: `data-etiqueta` es la franja horaria, `data-serie` lo que
+   * es y `data-valor` cuánto duró. Los lee `Interactivo` (el mismo envoltorio que el resto de
+   * gráficos del panel) y los pinta al instante, en vez del tooltip nativo que tarda un segundo
+   * y sale en la letra del sistema. El `<title>` se queda debajo: es lo que se ve sin
+   * JavaScript, en el lector de pantalla y al imprimir.
+   */
+  const rect = (t: Tramo, carril: Carril, fill: string, titulo: string, datos: { serie: string; valor: string; color?: string; extra?: string }, extra: Record<string, unknown> = {}) => (
+    <rect key={`${t.t0}-${t.clave}`} x={t.x0} y={carril.y} width={Math.max(0, t.x1 - t.x0)} height={carril.alto} fill={fill}
+      data-etiqueta={rango(t)} data-serie={datos.serie} data-valor={datos.valor} data-color={datos.color ?? fill} data-extra={datos.extra} {...extra}>
       <title>{titulo}</title>
     </rect>
   );
   const claseHora = (x: number) => `linea-dia__hora${x < 15 ? " linea-dia__hora--inicio" : x > ANCHO - 15 ? " linea-dia__hora--fin" : ""}`;
 
-  return (
+  const cuerpo = (
     <div className={`linea-dia linea-dia--${modo} linea-dia--${det}`}>
       {completo && <Controles datos={datos} zoom={zoom} v={v} esHoy={esHoy} ahoraMs={ahoraMs} detalle={det} enlace={enlace} />}
       {/* el lienzo es el marco de referencia del gutter: los nombres se alinean con los carriles, no con los chips */}
@@ -138,11 +149,16 @@ export function LineaDeTiempoDia({ datos, modo = "completo", ventana, ahora, zoo
             {esc.ticks.map((t) => (
               <line key={t.t} x1={t.x} x2={t.x} y1={c.eje.alto - 4} y2={alto} stroke="var(--color-line)" vectorEffect="non-scaling-stroke" />
             ))}
-            {estado.map((t) => rect(t, c.estado, t.clave === "sin_datos" ? `url(#${pid})` : COLOR_ESTADO[t.clave], tituloEstado(t)))}
-            {appInactiva.map((t) => rect(t, c.app, colorApp(t.clave), tituloApp(t, false), { opacity: 0.4 }))}
-            {appActiva.map((t) => rect(t, c.app, colorApp(t.clave), tituloApp(t, true)))}
+            {estado.map((t) => rect(t, c.estado, t.clave === "sin_datos" ? `url(#${pid})` : COLOR_ESTADO[t.clave], tituloEstado(t),
+              { serie: ETIQUETA_ESTADO[t.clave], valor: fmtMin(t.ms), color: COLOR_ESTADO[t.clave] }))}
+            {appInactiva.map((t) => rect(t, c.app, colorApp(t.clave), tituloApp(t, false),
+              { serie: etiquetaApp(t.clave), valor: fmtMin(t.ms), extra: "delante, sin tocar nada" }, { opacity: 0.4 }))}
+            {appActiva.map((t) => rect(t, c.app, colorApp(t.clave), tituloApp(t, true),
+              { serie: etiquetaApp(t.clave), valor: fmtMin(t.ms), extra: "con actividad" }))}
             {c.sap && sap.map((t) => (
-              <g key={t.visita.visit_uid}>
+              <g key={t.visita.visit_uid} data-etiqueta={`${t.clave || "pantalla SAP"} · ${fmtHora(t.visita.entered_at)}`}
+                data-serie="Estadía en la pantalla" data-valor={fmtSeg(t.visita.dwell_ms)} data-color="var(--color-accent)"
+                data-extra={`lista en ${fmtSeg(t.visita.ready_ms)} · esperó ${fmtSeg(t.visita.sap_wait_ms)}`}>
                 <rect x={t.x0} y={c.sap.y} width={t.x1 - t.x0} height={c.sap.alto} fill="var(--color-accent-soft)" />
                 {t.esperaFrac > 0 && (
                   <rect x={t.x0} y={c.sap.y + c.sap.alto * (1 - t.esperaFrac)} width={t.x1 - t.x0} height={c.sap.alto * t.esperaFrac} fill="var(--color-accent)" opacity={0.55} />
@@ -152,7 +168,8 @@ export function LineaDeTiempoDia({ datos, modo = "completo", ventana, ahora, zoo
               </g>
             ))}
             {c.pacientes && pac && pac.tramos.map((t) => (
-              <g key={`${t.t0}-${t.clave}`}>
+              <g key={`${t.t0}-${t.clave}`} data-etiqueta={rango(t)} data-serie={`Paciente P${pac.indice[t.clave] ?? "?"}`}
+                data-valor={fmtMin(t.ms)} data-color={colorPaciente(pac.indice[t.clave] ?? 0)}>
                 <rect x={t.x0} y={c.pacientes.y} width={t.x1 - t.x0} height={c.pacientes.alto} fill={colorPaciente(pac.indice[t.clave] ?? 0)} />
                 <line x1={t.x0} x2={t.x0} y1={c.pacientes.y} y2={c.pacientes.y + c.pacientes.alto} stroke="var(--color-surface)" vectorEffect="non-scaling-stroke" />
                 <title>{tituloPaciente(t)}</title>
@@ -164,7 +181,9 @@ export function LineaDeTiempoDia({ datos, modo = "completo", ventana, ahora, zoo
             {c.eventos && grupos.map((g) => {
               const hit = Math.max(2, Math.min(g.hueco, 12 / med.ancho));
               return (
-                <g key={g.t}>
+                <g key={g.t} data-etiqueta={horaLocal(g.t)} data-serie={g.marcas.length === 1 ? (ETIQUETA_EVENTO[g.marcas[0].kind] ?? g.marcas[0].kind) : `${g.marcas.length} eventos`}
+                  data-valor="" data-color="var(--color-secondary)"
+                  data-extra={g.marcas.length > 1 ? g.marcas.map((m) => ETIQUETA_EVENTO[m.kind] ?? m.kind).join(", ") : undefined}>
                   {g.glifo && <line x1={g.x} x2={g.x} y1={c.eje.alto} y2={c.eventos.y} stroke="var(--color-secondary)" strokeOpacity={0.3} strokeDasharray="2 3" vectorEffect="non-scaling-stroke" />}
                   <rect x={Math.max(0, g.x - hit / 2)} y={c.eventos.y} width={hit} height={c.eventos.alto} fill="transparent" />
                   <line x1={g.x} x2={g.x} y1={c.eventos.y} y2={c.eventos.y + c.eventos.alto} stroke="var(--color-secondary)" strokeOpacity={0.75} vectorEffect="non-scaling-stroke" />
@@ -214,6 +233,11 @@ export function LineaDeTiempoDia({ datos, modo = "completo", ventana, ahora, zoo
       {completo && <Leyenda visibles={visibles} hayHueco={hayHueco} grupos={grupos} pacientes={!!pac} visitas={sap.length > 0} />}
     </div>
   );
+
+  // El mismo globo que el resto de gráficos del panel: instantáneo, con el color de la banda y
+  // en la letra de la casa, en vez del tooltip nativo que tarda un segundo. En `mini` no se pone:
+  // la tarjeta entera de Inicio ya es un enlace y un globo encima estorbaría.
+  return completo ? <Interactivo modo="marca">{cuerpo}</Interactivo> : cuerpo;
 }
 
 /** Los mandos: tamaño del dibujo, ventanas fijas y navegación por horas. Enlaces normales
