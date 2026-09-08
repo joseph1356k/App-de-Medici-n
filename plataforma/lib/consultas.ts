@@ -18,8 +18,17 @@ export type { Estado, Marca, MedicoVisto, PacienteDelDia, Segmento } from "./seg
 
 const iso = (t: unknown): string | null => (t == null ? null : new Date(t as string).toISOString());
 
+/**
+ * La rebanada del estudio. Un PC RETIRADO queda fuera de todo lo que se cuenta: no es que se
+ * borre su historia —sigue en `jornadas` y en `samples`, y se ve en Dispositivos—, es que nunca
+ * fue parte del estudio. En el HGM un portátil con el medidor viejo instalado metía cuatro
+ * jornadas fantasma en el rango y salían como «excluidas por calidad», que es exactamente la
+ * clase de número que hace desconfiar de los otros. Un PC en PAUSA sí cuenta: está en el estudio,
+ * solo que apagado un rato.
+ */
 export const filtroJornadas = (f: Filtros) => sql`
   j.dia_operativo between ${f.desde}::date and ${f.hasta}::date
+  and exists (select 1 from devices d where d.id = j.device_id and d.status <> 'retired')
   ${f.fase ? sql`and j.phase = ${f.fase}` : sql``}
   ${f.consultorio ? sql`and j.consultorio_id = ${f.consultorio}::uuid` : sql``}
   ${f.dispositivo ? sql`and j.device_id = ${f.dispositivo}::uuid` : sql``}`;
@@ -44,6 +53,7 @@ export type JornadaResumen = {
   pre_atencion_ms: number; cola_post_jornada_ms: number; consulta_ms_p25: number | null; consulta_ms_p75: number | null;
   por_app: Record<string, { activo_ms: number; foreground_ms: number; typing_ms: number; keystrokes: number; clicks: number }>;
   por_hora: Record<string, number>;
+  por_hora_detalle: Record<string, { sap: number; otras: number; inactivo: number; bloqueado: number }>;
   calidad: Record<string, number | boolean | null>; calidad_ok: boolean; calidad_motivos: string[];
   sucia: boolean; resumido_en: string | null; algo_version: number;
 };

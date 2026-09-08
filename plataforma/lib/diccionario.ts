@@ -65,7 +65,8 @@ export const DICCIONARIO = {
         activo_por_app: "Objeto {app: ms activos}.", sap_users: "Objeto {login SAP: ms activos}.",
         calidad: "Objeto con los contadores del instrumento: cobertura_pct, sin_datos_ms, huecos_ms, clock_jumps, spool_dropped, hooks_degradados, hooks_rearmados, ticks_sap_saltados_busy, sap_scripting, sap_eventos_com, procesos.",
         calidad_ok: "Ver definiciones.calidad_ok.", calidad_motivos: "Lista de motivos por los que la jornada no es comparable (vacía si lo es).",
-        algo_version: "Versión del algoritmo de resumen (1 = jornadas por consultorio).", resumido_en: "Cuándo se calculó esta fila.",
+        por_hora_detalle: "De qué está hecha cada hora de Bogotá: {\"07\": {sap, otras, inactivo, bloqueado}} en ms. sap y otras se miden con input real (como activo_ms); inactivo y bloqueado con el tiempo que cubre la cubeta. La suma de sap por horas es exactamente his_ms, y sap+otras exactamente activo_ms; no suman 60 min por hora porque el resto de una cubeta activa no se atribuye a nadie, igual que en los totales del día.",
+        algo_version: "Versión del algoritmo de resumen (4 = con el perfil horario detallado).", resumido_en: "Cuándo se calculó esta fila.",
       },
     },
     pacientes: {

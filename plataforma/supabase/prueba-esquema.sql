@@ -124,7 +124,26 @@ do $$ declare ok boolean; j jornada_summary%rowtype; begin
   if j.primera_actividad <> timestamptz '2026-09-01 08:00:00-05' then raise exception 'primera_actividad: %', j.primera_actividad; end if;
   if j.ultima_actividad <> timestamptz '2026-09-01 08:00:00-05' + interval '6600 seconds' then raise exception 'ultima_actividad: %', j.ultima_actividad; end if;
   if j.sucia then raise exception 'el resumen recién hecho no puede estar sucio'; end if;
-  if j.algo_version <> 3 then raise exception 'algo_version: % (esperado 3)', j.algo_version; end if;
+  if j.algo_version <> 4 then raise exception 'algo_version: % (esperado 4)', j.algo_version; end if;
+  -- por_hora_detalle: de qué está hecha cada hora, calculado a mano sobre el fixture.
+  --   hora 08 = g 0..239 (240 cubetas): 216 sap y 24 chrome, 12 000 ms de activo cada una
+  --             → sap 2 592 000 · otras 288 000 · nada inactivo ni bloqueado
+  --   hora 09 = g 240..299 y 380..439 (120 cubetas): 108 sap y 12 chrome
+  --             → sap 1 296 000 · otras 144 000; y la fila fundida de bloqueado arranca a las
+  --               09:50, así que sus 600 000 ms cuentan enteros en la hora en que EMPIEZA
+  if (j.por_hora_detalle->'08'->>'sap')::bigint <> 2592000 or (j.por_hora_detalle->'08'->>'otras')::bigint <> 288000
+     or (j.por_hora_detalle->'08'->>'inactivo')::bigint <> 0 or (j.por_hora_detalle->'08'->>'bloqueado')::bigint <> 0 then
+    raise exception 'por_hora_detalle 08: %', j.por_hora_detalle->'08'; end if;
+  if (j.por_hora_detalle->'09'->>'sap')::bigint <> 1296000 or (j.por_hora_detalle->'09'->>'otras')::bigint <> 144000
+     or (j.por_hora_detalle->'09'->>'bloqueado')::bigint <> 600000 then
+    raise exception 'por_hora_detalle 09: %', j.por_hora_detalle->'09'; end if;
+  -- Y lo que hace que el gráfico por horas y los totales del día no se contradigan: la suma de las
+  -- horas es exactamente his_ms, y sap + otras es exactamente activo_ms.
+  if (select sum((v->>'sap')::bigint) from jsonb_each(j.por_hora_detalle) e(k, v)) <> j.his_ms then
+    raise exception 'por_hora_detalle: la suma de sap (%) no cuadra con his_ms (%)',
+      (select sum((v->>'sap')::bigint) from jsonb_each(j.por_hora_detalle) e(k, v)), j.his_ms; end if;
+  if (select sum((v->>'sap')::bigint + (v->>'otras')::bigint) from jsonb_each(j.por_hora_detalle) e(k, v)) <> j.activo_ms then
+    raise exception 'por_hora_detalle: sap + otras no cuadra con activo_ms (%)', j.activo_ms; end if;
   -- algo_version 2: arranque, cola, percentiles, por app y por hora
   if j.pre_atencion_ms <> 0 then raise exception 'pre_atencion_ms: % (esperado 0: el primer paciente abre en la cubeta 0)', j.pre_atencion_ms; end if;
   -- cola: sap activo después de abrir al último paciente (B, cubeta 120): 162 + 54 cubetas sap × 12000

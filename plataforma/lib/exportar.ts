@@ -19,7 +19,7 @@ export const COLUMNAS = {
     "pacientes", "consulta_ms_mediana", "activo_por_paciente_mediana", "entre_consultas_ms_mediana", "post_atencion_ms", "interrupciones", "pacientes_por_hora",
     "visitas", "pantallas_distintas", "revisitas_sap", "sap_wait_ms", "sap_roundtrips", "ready_ms_p50", "ready_ms_p95",
     "bloqueado_ms", "inactivo_ms", "sin_datos_ms", "cobertura_pct", "carga_admin_pct", "tramos", "tramos_ms", "procesos", "app_version",
-    "pre_atencion_ms", "cola_post_jornada_ms", "consulta_ms_p25", "consulta_ms_p75", "por_app", "por_hora",
+    "pre_atencion_ms", "cola_post_jornada_ms", "consulta_ms_p25", "consulta_ms_p75", "por_app", "por_hora", "por_hora_detalle",
     "activo_por_app", "sap_users", "calidad", "calidad_ok", "calidad_motivos", "algo_version", "resumido_en"],
   pacientes: ["device_id", "consultorio_id", "consultorio", "dia_operativo", "phase", "orden", "encounter_key", "sap_user", "medico_id", "medico",
     "primera_vez", "ultima_vez", "consulta_ms", "activo_ms", "his_ms", "miracle_ms", "typing_ms", "keystrokes", "clicks",
@@ -47,7 +47,7 @@ export function consulta(col: Coleccion, f: Filtros) {
         j.pacientes, j.consulta_ms_mediana, j.activo_por_paciente_mediana, j.entre_consultas_ms_mediana, j.post_atencion_ms, j.interrupciones, j.pacientes_por_hora,
         j.visitas, j.pantallas_distintas, j.revisitas_sap, j.sap_wait_ms, j.sap_roundtrips, j.ready_ms_p50, j.ready_ms_p95,
         j.bloqueado_ms, j.inactivo_ms, j.sin_datos_ms, j.cobertura_pct, j.carga_admin_pct, j.tramos, j.tramos_ms, j.procesos, j.app_version,
-        j.pre_atencion_ms, j.cola_post_jornada_ms, j.consulta_ms_p25, j.consulta_ms_p75, j.por_app, j.por_hora,
+        j.pre_atencion_ms, j.cola_post_jornada_ms, j.consulta_ms_p25, j.consulta_ms_p75, j.por_app, j.por_hora, j.por_hora_detalle,
         j.activo_por_app, j.sap_users, j.calidad, j.calidad_ok, j.calidad_motivos, j.algo_version, j.resumido_en
         from jornada_summary j left join consultorios c on c.id = j.consultorio_id left join devices d on d.id = j.device_id
         where ${filtroJornadas(f)} order by j.dia_operativo, c.orden, d.machine_name`;

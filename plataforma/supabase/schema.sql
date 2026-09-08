@@ -373,6 +373,10 @@ create table if not exists jornada_summary (
   consulta_ms_p75 bigint,
   por_app jsonb not null default '{}'::jsonb,     -- {app: {activo_ms, foreground_ms, typing_ms, keystrokes, clicks}}
   por_hora jsonb not null default '{}'::jsonb,    -- {"07": activo_ms, "08": …} hora de Bogotá
+  -- {"07": {"sap": ms, "otras": ms, "inactivo": ms, "bloqueado": ms}} — de qué está hecha cada
+  -- hora. Se precalcula aquí y no se lee de `samples` en caliente: el mismo cálculo sobre 30 días
+  -- de cubetas son 87.310 filas y 1,5 s, y crece lineal hasta comerse el reloj de 20 s del panel.
+  por_hora_detalle jsonb not null default '{}'::jsonb,
   calidad jsonb not null default '{}'::jsonb,
   calidad_ok boolean not null default false,
   calidad_motivos text[] not null default '{}',
@@ -389,6 +393,11 @@ alter table jornada_summary add column if not exists consulta_ms_p25 bigint;
 alter table jornada_summary add column if not exists consulta_ms_p75 bigint;
 alter table jornada_summary add column if not exists por_app jsonb not null default '{}'::jsonb;
 alter table jornada_summary add column if not exists por_hora jsonb not null default '{}'::jsonb;
+alter table jornada_summary add column if not exists por_hora_detalle jsonb not null default '{}'::jsonb;
+
+-- El tablero recorre las visitas de un rango sin filtrar por consultorio ni por PC; los índices
+-- que existen empiezan por consultorio_id o device_id y no sirven para eso.
+create index if not exists sap_visits_dia_idx on sap_visits (dia_operativo);
 
 -- ── Encuentros: una fila por paciente y día ──────────────────────────────────
 -- Lo que cuesta CADA consulta, derivado de las cubetas al resumir la jornada (se regenera con
@@ -474,7 +483,7 @@ begin
 end;
 $$;
 
--- EL RESUMEN de una jornada desde el crudo (algo_version = 3): primero los ENCUENTROS (una fila
+-- EL RESUMEN de una jornada desde el crudo (algo_version = 4): primero los ENCUENTROS (una fila
 -- por paciente) y después la jornada, que lee de ellos. Recomputable: cambiar una definición y
 -- volver a correr no pierde nada. Con p_min_intervalo > 0 hace de acelerador: si se resumió
 -- hace menos, solo la marca sucia y devuelve false (la ingesta lo llama cada minuto; el cron
@@ -497,6 +506,7 @@ $$;
 --   cola_post_jornada  activo en SAP después de abrir al último paciente del día (la cola de documentación)
 --   revisitas_sap      volver a una pantalla ya visitada con el mismo paciente
 --   por_app / por_hora activo, tecleo y clics por app; activo por hora de Bogotá
+--   por_hora_detalle de qué está hecha cada hora: sap, otras apps, inactivo y bloqueado
 --   calidad_ok         spool_dropped = 0 y clock_jumps <= 2 y cobertura >= 80 (y hubo actividad)
 create or replace function recompute_jornada(p_device uuid, p_dia date, p_min_intervalo interval default interval '0')
 returns boolean language plpgsql as $$
@@ -575,7 +585,7 @@ begin
     visitas, pantallas_distintas, revisitas_sap, sap_wait_ms, sap_roundtrips, ready_ms_p50, ready_ms_p95,
     bloqueado_ms, inactivo_ms, sin_datos_ms, cobertura_pct, carga_admin_pct,
     tramos, tramos_ms, procesos, app_version,
-    pre_atencion_ms, cola_post_jornada_ms, consulta_ms_p25, consulta_ms_p75, por_app, por_hora,
+    pre_atencion_ms, cola_post_jornada_ms, consulta_ms_p25, consulta_ms_p75, por_app, por_hora, por_hora_detalle,
     calidad, calidad_ok, calidad_motivos, sucia, resumido_en, algo_version)
   with fila as (
     select s.bucket_start, s.seq, s.app, s.surface, s.encounter_key, s.sap_user,
@@ -639,6 +649,18 @@ begin
   horas as (
     select coalesce(jsonb_object_agg(h, ms), '{}'::jsonb) j
     from (select to_char(bucket_start at time zone 'America/Bogota', 'HH24') h, sum(active_ms) ms from b group by 1) x),
+  -- DE QUÉ ESTÁ HECHA CADA HORA. Mismas definiciones que `tot`, para que la suma por horas cuadre
+  -- con his_ms / activo_ms / inactivo_ms de la jornada: sap y otras se miden con el input real
+  -- (active_ms) y lo inactivo con el tiempo que cubre la cubeta (dur_ms). No suman 60 min por hora
+  -- a propósito — el resto de una cubeta activa no es de nadie, igual que en los totales del día.
+  horas_det as (
+    select coalesce(jsonb_object_agg(h, jsonb_build_object('sap', sap, 'otras', otras, 'inactivo', inact, 'bloqueado', bloq)), '{}'::jsonb) j
+    from (select to_char(bucket_start at time zone 'America/Bogota', 'HH24') h,
+            coalesce(sum(active_ms) filter (where app = 'sap'), 0)::bigint sap,
+            coalesce(sum(active_ms) filter (where app not in ('sap', 'bloqueado')), 0)::bigint otras,
+            coalesce(sum(dur_ms) filter (where app <> 'bloqueado' and active_ms = 0), 0)::bigint inact,
+            coalesce(sum(dur_ms) filter (where app = 'bloqueado'), 0)::bigint bloq
+          from b group by 1) x),
   users as (
     select coalesce(jsonb_object_agg(sap_user, ms), '{}'::jsonb) j from (select sap_user, sum(active_ms) ms from b where sap_user is not null group by sap_user) u),
   isl as (
@@ -703,7 +725,7 @@ begin
     tot.bloq, tot.inact, gaps.ms, calc.cobertura,
     case when tot.act > 0 then round((tot.his * 100.0 / tot.act)::numeric, 1) end,
     tramos.n, tramos.ms, cal.procesos, coalesce(cal.appv, ''),
-    extra.pre, extra.cola, enc.consulta_p25, enc.consulta_p75, detalle.j, horas.j,
+    extra.pre, extra.cola, enc.consulta_p25, enc.consulta_p75, detalle.j, horas.j, horas_det.j,
     jsonb_build_object(
       'cobertura_pct', calc.cobertura, 'sin_datos_ms', gaps.ms, 'huecos_ms', cal.huecos, 'clock_jumps', cal.jumps,
       'spool_dropped', cal.dropped, 'hooks_degradados', cal.deg, 'hooks_rearmados', cal.rearm,
@@ -714,8 +736,8 @@ begin
       case when cal.jumps > 2 then 'clock_jumps' end,
       case when ventana.pa is not null and coalesce(calc.cobertura, 0) < 80 then 'cobertura' end,
       case when ventana.pa is null then 'sin_actividad' end], null::text),
-    false, now(), 3
-  from tot, ventana, cubierto, gaps, apps, detalle, horas, users, tramos, enc, entre, extra, vis, cal, calc
+    false, now(), 4
+  from tot, ventana, cubierto, gaps, apps, detalle, horas, horas_det, users, tramos, enc, entre, extra, vis, cal, calc
   on conflict (device_id, dia_operativo) do update set
     consultorio_id = excluded.consultorio_id, phase = excluded.phase,
     primera_actividad = excluded.primera_actividad, ultima_actividad = excluded.ultima_actividad,
@@ -735,7 +757,8 @@ begin
     cobertura_pct = excluded.cobertura_pct, carga_admin_pct = excluded.carga_admin_pct,
     tramos = excluded.tramos, tramos_ms = excluded.tramos_ms, procesos = excluded.procesos, app_version = excluded.app_version,
     pre_atencion_ms = excluded.pre_atencion_ms, cola_post_jornada_ms = excluded.cola_post_jornada_ms,
-    consulta_ms_p25 = excluded.consulta_ms_p25, consulta_ms_p75 = excluded.consulta_ms_p75, por_app = excluded.por_app, por_hora = excluded.por_hora,
+    consulta_ms_p25 = excluded.consulta_ms_p25, consulta_ms_p75 = excluded.consulta_ms_p75,
+    por_app = excluded.por_app, por_hora = excluded.por_hora, por_hora_detalle = excluded.por_hora_detalle,
     calidad = excluded.calidad, calidad_ok = excluded.calidad_ok, calidad_motivos = excluded.calidad_motivos,
     sucia = false, resumido_en = now(), algo_version = excluded.algo_version;
   return true;
@@ -762,7 +785,7 @@ begin
       -- Y las que se resumieron con un algoritmo viejo. Sin esto, cambiar la forma de medir deja
       -- media historia calculada con la regla anterior y la otra media con la nueva, y nadie se
       -- entera hasta que dos números que deberían cuadrar no cuadran.
-      select s.device_id, s.dia_operativo from jornada_summary s where s.algo_version < 3
+      select s.device_id, s.dia_operativo from jornada_summary s where s.algo_version < 4
     ) x order by x.dia_operativo limit greatest(1, coalesce(p_max, 500))
   loop
     perform recompute_jornada(r.device_id, r.dia_operativo);
