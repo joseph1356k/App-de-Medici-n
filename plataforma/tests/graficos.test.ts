@@ -6,6 +6,7 @@ import {
   COLOR_SERIE, LIMITES_ESPERA, apilar, bandas, colorConsultorio, cubetaDeEspera, cubetasEspera,
   mediana, medianaPorDia, posicionEnCubetas, rectRedondeadoArriba, seriesATabla, topN, topeBonito,
 } from "../lib/graficos";
+import { cargaDeSap, corregido, delanteSinTocar, esperaPorPantalla, fueraDelHis, pantallasPorHora, ritmoDeTecleo } from "../lib/metricas";
 
 describe("topeBonito", () => {
   it("sube al siguiente número redondo, y nunca deja el máximo fuera del eje", () => {
@@ -146,5 +147,48 @@ describe("colorConsultorio", () => {
   it("«sin consultorio» va en gris, nunca en un slot de serie", () => {
     expect(colorConsultorio(999)).toBe("var(--color-otro)");
     expect(colorConsultorio(0)).toBe("var(--color-otro)");
+  });
+});
+
+// LAS MÉTRICAS DERIVADAS. Viven en un solo sitio para que la vista de un día, el tablero y la
+// exportación no discrepen; aquí se fija lo que significan y, sobre todo, que devuelven «no se
+// sabe» en vez de un cero inventado cuando no hay con qué dividir.
+describe("metricas derivadas", () => {
+  const j = {
+    foreground_ms: 50_000, activo_ms: 20_000, his_ms: 12_000, miracle_ms: 0,
+    typing_ms: 60_000, keystrokes: 300, correcciones: 30,
+    sap_wait_ms: 9_000, visitas: 6, tramos_ms: 3_600_000,
+  };
+
+  it("delante sin tocar es lo que estuvo la pantalla delante sin input", () => {
+    expect(delanteSinTocar(j)).toBe(30_000);
+    expect(delanteSinTocar({ foreground_ms: 5, activo_ms: 10 })).toBe(0); // nunca negativo
+  });
+
+  it("fuera del HIS descuenta SAP y Miracle del activo", () => {
+    expect(fueraDelHis(j)).toBe(8_000);
+    expect(fueraDelHis({ activo_ms: 100, his_ms: 60, miracle_ms: 50 })).toBe(0);
+  });
+
+  it("el ritmo de tecleo se mide DENTRO de las ráfagas, no sobre la jornada", () => {
+    expect(ritmoDeTecleo(j)).toBe(300); // 300 teclas en 1 min escribiendo
+    expect(ritmoDeTecleo({ keystrokes: 300, typing_ms: 0 })).toBeNull();
+  });
+
+  it("las divisiones sin denominador dicen «no se sabe», no cero", () => {
+    expect(corregido({ correcciones: 5, keystrokes: 0 })).toBeNull();
+    expect(esperaPorPantalla({ sap_wait_ms: 100, visitas: 0 })).toBeNull();
+    expect(pantallasPorHora({ visitas: 10, tramos_ms: 0 })).toBeNull();
+    expect(cargaDeSap({ his_ms: 10, activo_ms: 0 })).toBeNull();
+  });
+
+  it("los porcentajes salen en porcentaje, no en fracción", () => {
+    expect(corregido(j)).toBe(10);
+    expect(cargaDeSap(j)).toBe(60);
+  });
+
+  it("espera por pantalla y pantallas por hora", () => {
+    expect(esperaPorPantalla(j)).toBe(1500);
+    expect(pantallasPorHora(j)).toBe(6);
   });
 });

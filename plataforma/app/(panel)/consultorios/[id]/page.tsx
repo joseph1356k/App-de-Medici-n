@@ -1,10 +1,16 @@
 import Link from "next/link";
 import { AutoRefresco } from "@/components/AutoRefresco";
+import { Cifra } from "@/components/Cifra";
 import { LineaDeTiempoDia } from "@/components/LineaDeTiempoDia";
-import { Calidad, ChipFase, Insignia, Seccion, Tile, Vacio } from "@/components/ui";
+import { Barras } from "@/components/graficos/Barras";
+import { Columnas } from "@/components/graficos/Columnas";
+import { Interactivo } from "@/components/graficos/Interactivo";
+import { CabeceraPagina, Calidad, ChipFase, Insignia, Seccion, Vacio } from "@/components/ui";
+import { topN } from "@/lib/graficos";
+import { cargaDeSap, corregido, delanteSinTocar, esperaPorPantalla, fueraDelHis, pantallasPorHora, ritmoDeTecleo } from "@/lib/metricas";
 import { encuentrosDelDia, lineaDeTiempoDia } from "@/lib/consultas";
 import { hoyOperativo, leerFecha, sumarDias, type Sp } from "@/lib/filtros";
-import { ETIQUETA_EVENTO, fmtFecha, fmtHora, fmtMin, fmtNum, fmtPct, fmtSeg, glifoEvento } from "@/lib/formato";
+import { ETIQUETA_EVENTO, colorApp, etiquetaApp, fmtFecha, fmtHora, fmtHoras, fmtMin, fmtNum, fmtPct, fmtSeg, glifoEvento } from "@/lib/formato";
 import { indicePacientes, leerDetalle, ventanaAuto, ventanaDesdeQuery } from "@/lib/linea-tiempo";
 import { totalesPorEstado } from "@/lib/segmentos";
 
@@ -46,6 +52,31 @@ export default async function ConsultorioDiaPage({ params, searchParams }: { par
   const hayDatos = datos.segmentos.length > 0;
   const href = (f: string) => `/consultorios/${id}?fecha=${f}`;
   const calidad = Object.entries(r?.calidad ?? {}).filter(([k]) => k in ETIQUETA_CALIDAD);
+  const hayPacientes = (r?.pacientes ?? 0) > 0;
+
+  // El perfil por horas y el reparto por app salen de la MISMA fila del resumen: dos gráficos más
+  // sin una consulta más.
+  const HORAS = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, "0"));
+  const det = r?.por_hora_detalle ?? {};
+  const perfilDelDia = Object.keys(det).length === 0 ? [] : [
+    { id: "sap", nombre: "SAP (HIS)", color: "var(--color-perfil-sap)", valores: HORAS.map((h) => Number(det[h]?.sap ?? 0)) },
+    { id: "otras", nombre: "Otras apps", color: "var(--color-perfil-otras)", valores: HORAS.map((h) => Number(det[h]?.otras ?? 0)) },
+    { id: "inactivo", nombre: "Encendido sin uso", color: "var(--color-perfil-inactivo)", valores: HORAS.map((h) => Number(det[h]?.inactivo ?? 0)) },
+  ];
+
+  const apps = Object.entries(r?.activo_por_app ?? {})
+    .filter(([app, ms]) => app !== "bloqueado" && Number(ms) > 0)
+    .map(([app, ms]) => ({ app, ms: Number(ms) }));
+  const appsTop = topN(apps, 6, (a) => a.ms, (suma, cuantos) => ({ app: `resto (${cuantos})`, ms: suma }));
+  const totalApps = Math.max(1, appsTop.reduce((s, a) => s + a.ms, 0));
+  const filaApps = {
+    id: "dia", etiqueta: fmtFecha(fecha), texto: fmtHoras(totalApps),
+    partes: appsTop.map((a) => ({
+      id: a.app, nombre: etiquetaApp(a.app), valor: a.ms,
+      color: a.app.startsWith("resto") ? "var(--color-otro)" : colorApp(a.app),
+      texto: fmtPct((a.ms / totalApps) * 100), extra: fmtMin(a.ms),
+    })),
+  };
 
   // Los ENCUENTROS son la fuente buena (los calcula el resumen: SAP, tecleo, clics,
   // post-atención, hueco hasta el siguiente). Mientras el resumen no haya corrido todavía
@@ -67,20 +98,23 @@ export default async function ConsultorioDiaPage({ params, searchParams }: { par
   return (
     <div className="space-y-6">
       <div>
-        <Link href="/" className="text-sm text-accent hover:underline print:hidden">← Inicio</Link>
-        <div className="mt-1 flex flex-wrap items-center justify-between gap-3">
-          <h1 className="titulo-pagina">{datos.consultorio.nombre} · {fmtFecha(fecha)}</h1>
-          <nav aria-label="Cambiar de día" className="flex flex-wrap items-center gap-1 text-sm print:hidden">
-            <Link href={href(sumarDias(fecha, -1))} className="boton">◀ ayer</Link>
-            {esHoy ? <span className="boton opacity-50" aria-disabled="true">hoy</span> : <Link href={href(hoy)} className="boton">hoy</Link>}
-            {esHoy ? <span className="boton opacity-50" aria-disabled="true">mañana ▶</span> : <Link href={href(sumarDias(fecha, 1))} className="boton">mañana ▶</Link>}
-            <form method="get" className="ml-1 flex items-center gap-1">
-              <input type="date" name="fecha" defaultValue={fecha} max={hoy} className="campo" aria-label="Fecha" />
-              <button className="boton">Ir</button>
-            </form>
-          </nav>
-        </div>
-        <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted">
+        <CabeceraPagina
+          eyebrow={datos.consultorio.nombre}
+          titulo={fmtFecha(fecha)}
+          acciones={
+            <nav aria-label="Cambiar de día" className="flex flex-wrap items-center gap-1 text-sm">
+              <Link href={href(sumarDias(fecha, -1))} className="boton">◀ ayer</Link>
+              {esHoy ? <span className="boton opacity-50" aria-disabled="true">hoy</span> : <Link href={href(hoy)} className="boton">hoy</Link>}
+              {esHoy ? <span className="boton opacity-50" aria-disabled="true">mañana ▶</span> : <Link href={href(sumarDias(fecha, 1))} className="boton">mañana ▶</Link>}
+              <form method="get" className="ml-1 flex items-center gap-1">
+                <input type="date" name="fecha" defaultValue={fecha} max={hoy} className="campo" aria-label="Fecha" />
+                <button className="boton">Ir</button>
+              </form>
+            </nav>
+          }
+        />
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-muted">
+          <Link href="/" className="text-accent hover:underline print:hidden">← Inicio</Link>
           {datos.device && <Insignia tono="neutro" title="PC asignado ese día">{datos.device.machine_name || "PC sin nombre"}</Insignia>}
           {r?.app_version && <Insignia tono="neutro" title="Versión del medidor">v{r.app_version}</Insignia>}
           {r && <ChipFase fase={r.phase} />}
@@ -103,20 +137,105 @@ export default async function ConsultorioDiaPage({ params, searchParams }: { par
             <LineaDeTiempoDia datos={datos} modo="completo" ventana={ventana} ahora={ahora} zoom={zoom} detalle={detalle} />
           </Seccion>
 
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5">
-            <Tile label="Activo en el PC" value={fmtMin(r?.activo_ms)} sub={r ? `cobertura ${fmtPct(r.cobertura_pct)} · ${fmtNum(r.tramos)} tramo${r.tramos === 1 ? "" : "s"}` : "resumen pendiente (se calcula cada 5 min)"} hero />
-            <Tile label="En SAP (HIS)" value={fmtMin(r?.his_ms)} sub={r ? `${fmtPct(r.carga_admin_pct)} del activo · Miracle ${fmtMin(r.miracle_ms)}` : undefined} />
-            <Tile label="Escribiendo" value={fmtMin(r?.typing_ms)} sub={r ? `${fmtNum(r.keystrokes)} teclas · ${fmtNum(r.clicks)} clics` : undefined} />
-            <Tile label="Pacientes" value={fmtNum(r?.pacientes ?? datos.pacientes.length)} sub={r ? `${fmtNum(r.pacientes_por_hora, 1)} por hora · ${fmtNum(r.interrupciones)} interrupciones` : `${datos.pacientes.length} en las cubetas`} />
-            <Tile label="Consulta (mediana)" value={fmtMin(r?.consulta_ms_mediana)} sub="reloj de pared, del primer al último toque" />
-            <Tile label="Espera de SAP" value={fmtSeg(r?.sap_wait_ms)} sub={r ? `${fmtNum(r.sap_roundtrips)} round-trips` : undefined} />
-            <Tile label="Pantalla lista p50 · p95" value={`${fmtSeg(r?.ready_ms_p50)} · ${fmtSeg(r?.ready_ms_p95)}`} sub={r ? `${fmtNum(r.visitas)} visitas · ${fmtNum(r.pantallas_distintas)} pantallas` : undefined} />
-            <Tile label="Bloqueado" value={fmtMin(tot.bloqueado)} sub="sesión de Windows bloqueada" />
-            <Tile label="Sin datos" value={fmtMin(tot.sin_datos)} tono={tot.sin_datos > 0 ? "critico" : undefined} sub="huecos entre cubetas: PC apagado, suspendido o medidor caído" />
-            <Tile label="Hasta el siguiente paciente" value={fmtMin(r?.entre_consultas_ms_mediana)} sub={r ? `post-atención ${fmtMin(r.post_atencion_ms)}` : undefined} />
-            <Tile label="Arranque del día" value={fmtMin(r?.pre_atencion_ms)} sub="activo antes de abrir al primer paciente" />
-            <Tile label="Cola de documentación" value={fmtMin(r?.cola_post_jornada_ms)} sub={r ? `en SAP tras abrir al último paciente · consulta p25–p75 ${fmtMin(r.consulta_ms_p25)} – ${fmtMin(r.consulta_ms_p75)}` : "en SAP tras abrir al último paciente"} />
+          {/* NIVEL 0 y 1 — lo que resume el día, y lo importante. El orden no es decorativo: antes
+              estas doce cifras iban todas del mismo tamaño y en la misma rejilla, así que «Sin
+              datos: 0 min» pesaba lo mismo que «Activo: 9 h». */}
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+            <Cifra clase="xl:col-span-2" etiqueta="Activo en el PC" valor={fmtMin(r?.activo_ms)} variante="hero"
+              reparto={r ? [
+                { nombre: "SAP", valor: r.his_ms, color: "var(--color-perfil-sap)" },
+                { nombre: "Otras apps", valor: fueraDelHis(r), color: "var(--color-perfil-otras)" },
+                { nombre: "Miracle", valor: r.miracle_ms, color: "var(--color-s2)" },
+              ] : undefined}
+              sub={r ? `cobertura ${fmtPct(r.cobertura_pct)} · ${fmtNum(r.tramos)} tramo${r.tramos === 1 ? "" : "s"} de actividad` : "resumen pendiente (se calcula cada 5 min)"} />
+            <Cifra etiqueta="En SAP (HIS)" valor={fmtMin(r?.his_ms)} sub={r ? `${fmtNum(r.visitas)} visitas · ${fmtNum(r.pantallas_distintas)} pantallas distintas` : undefined} />
+            <Cifra etiqueta="Carga de SAP" valor={fmtPct(r ? cargaDeSap(r) : null)} sub="del tiempo activo" />
+            <Cifra etiqueta="Escribiendo" valor={fmtMin(r?.typing_ms)} sub={r ? `${fmtNum(r.keystrokes)} teclas · ${fmtNum(r.clicks)} clics` : undefined} />
+            <Cifra etiqueta="Fuera de SAP" valor={fmtMin(r ? fueraDelHis(r) : null)} sub="trabajo activo fuera del HIS y de Miracle" />
+            <Cifra etiqueta="Espera de SAP" valor={fmtSeg(r?.sap_wait_ms)} sub={r ? `${fmtNum(r.sap_roundtrips)} round-trips · ${fmtSeg(esperaPorPantalla(r))} por pantalla` : undefined} />
+            <Cifra etiqueta="Pantalla lista p95" valor={fmtSeg(r?.ready_ms_p95)} sub={r ? `mediana ${fmtSeg(r.ready_ms_p50)}` : undefined} />
+            <Cifra etiqueta="Delante sin tocar" valor={fmtMin(r ? delanteSinTocar(r) : null)} sub="la pantalla delante, sin input: leer y esperar" />
+            <Cifra etiqueta="Encendido sin uso" valor={fmtMin(r?.inactivo_ms)} sub="desbloqueado y sin que nadie lo toque" />
+            <Cifra etiqueta="Bloqueado" valor={fmtMin(tot.bloqueado)} sub="sesión de Windows bloqueada" />
+            {tot.sin_datos > 0 && (
+              <Cifra etiqueta="Sin datos" valor={fmtMin(tot.sin_datos)} tono="critico"
+                sub="huecos entre cubetas: PC apagado, suspendido o medidor caído" />
+            )}
           </div>
+
+          {/* Los dos gráficos del día. No cuestan una consulta más: `por_hora_detalle` y `por_app`
+              ya vienen en la fila del resumen. */}
+          {r && (
+            <div className="grid gap-4 lg:grid-cols-2">
+              <Seccion titulo="La forma del día" sub="Minutos por hora de Bogotá: cuánto en SAP, cuánto en otras apps y cuánto con el PC encendido sin que nadie lo toque.">
+                {perfilDelDia.length === 0 ? <p className="text-sm text-muted">Este día se resumió antes de que existiera el perfil por horas.</p> : (
+                  <Interactivo modo="cruceta">
+                    <Columnas ancho={560} alto={200} xs={HORAS} etiquetaX={(h) => h} etiquetaLarga={(h) => `${h}:00 – ${h}:59`}
+                      series={perfilDelDia} fmt={(v) => `${Math.round(v / 60000)} min`}
+                      ariaLabel="La forma del día por horas" cabeceraTabla="Hora" />
+                  </Interactivo>
+                )}
+              </Seccion>
+              <Seccion titulo="En qué se fue el tiempo" sub="El reparto del tiempo activo por aplicación. Una app que no esté en el catálogo aparece con el nombre de su programa.">
+                {filaApps.partes.length === 0 ? <p className="text-sm text-muted">Sin actividad por app este día.</p> : (
+                  <Interactivo modo="marca">
+                    <Barras modo="cien" leyenda filas={[filaApps]} ariaLabel="Reparto del tiempo activo por app" cabeceraTabla="Día" />
+                  </Interactivo>
+                )}
+              </Seccion>
+            </div>
+          )}
+
+          {/* NIVEL 2 — la actividad, para hojear. Catorce columnas que se medían desde el primer
+              día y no aparecían en ninguna parte. */}
+          <Seccion titulo="La actividad, al detalle" sub="Lo que se contó tecla a tecla y clic a clic. Copiar y pegar importan: son la señal de que algo se redacta fuera de SAP y se pega dentro.">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+              <Cifra variante="menor" etiqueta="Teclas" valor={fmtNum(r?.keystrokes)} sub={`${fmtNum(ritmoDeTecleo(r ?? {}), 0)} por minuto escribiendo`} />
+              <Cifra variante="menor" etiqueta="Clics" valor={fmtNum(r?.clicks)} />
+              <Cifra variante="menor" etiqueta="Corregido" valor={fmtPct(r ? corregido(r) : null)} sub={`${fmtNum(r?.correcciones)} borrados`} />
+              <Cifra variante="menor" etiqueta="Copiar · pegar" valor={`${fmtNum(r?.copias)} · ${fmtNum(r?.pegados)}`} />
+              <Cifra variante="menor" etiqueta="Guardados" valor={fmtNum(r?.guardados)} />
+              <Cifra variante="menor" etiqueta="Tab · Enter" valor={`${fmtNum(r?.tabs)} · ${fmtNum(r?.enters)}`} />
+              <Cifra variante="menor" etiqueta="Cambios de contexto" valor={fmtNum(r?.context_switches)} sub="saltos de app, pantalla o paciente" />
+              <Cifra variante="menor" etiqueta="Scroll" valor={fmtNum(r?.scroll_ticks)} />
+              <Cifra variante="menor" etiqueta="Revisitas SAP" valor={fmtNum(r?.revisitas_sap)} sub="volver a una pantalla ya vista" />
+              <Cifra variante="menor" etiqueta="Pantallas por hora" valor={fmtNum(r ? pantallasPorHora(r) : null, 1)} sub="por hora de actividad" />
+              <Cifra variante="menor" etiqueta="En tramos de actividad" valor={fmtMin(r?.tramos_ms)} />
+              <Cifra variante="menor" etiqueta="Ventana del día" valor={fmtMin(r?.ventana_ms)} sub="de la primera a la última cubeta activa" />
+            </div>
+          </Seccion>
+
+          {/* NIVEL 3 — lo que todavía no se puede medir, y POR QUÉ. Sube solo a nivel 1 el día que
+              la regla de identidad funcione: la página no hay que volver a tocarla. */}
+          {hayPacientes ? (
+            <Seccion titulo="Por paciente" sub="Lo que costó cada consulta, medido sobre las huellas del día.">
+              <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
+                <Cifra etiqueta="Pacientes" valor={fmtNum(r?.pacientes)} sub={`${fmtNum(r?.pacientes_por_hora, 1)} por hora de actividad`} />
+                <Cifra etiqueta="Consulta (mediana)" valor={fmtMin(r?.consulta_ms_mediana)} sub={`p25–p75 ${fmtMin(r?.consulta_ms_p25)} – ${fmtMin(r?.consulta_ms_p75)}`} />
+                <Cifra etiqueta="Activo por paciente" valor={fmtMin(r?.activo_por_paciente_mediana)} />
+                <Cifra etiqueta="Hasta el siguiente" valor={fmtMin(r?.entre_consultas_ms_mediana)} />
+                <Cifra etiqueta="Post-atención" valor={fmtMin(r?.post_atencion_ms)} sub={`${fmtNum(r?.interrupciones)} interrupciones`} />
+                <Cifra etiqueta="Arranque · cola" valor={`${fmtMin(r?.pre_atencion_ms)} · ${fmtMin(r?.cola_post_jornada_ms)}`} sub="antes del primer paciente · en SAP tras el último" />
+              </div>
+            </Seccion>
+          ) : (
+            <Seccion titulo="Todavía sin datos" sub="Ocho métricas del estudio dependen de identificar al paciente en la pantalla de SAP, y hoy no se identifica ninguno.">
+              <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-8">
+                {["Pacientes", "Consulta (mediana)", "Activo por paciente", "Hasta el siguiente", "Post-atención", "Arranque del día", "Cola de documentación", "Interrupciones"]
+                  .map((e) => <Cifra key={e} variante="apagada" etiqueta={e} valor="—" />)}
+              </div>
+              <p className="mt-3 text-sm text-secondary">
+                La regla busca un número de paciente en el título de la ventana de SAP y no lo encuentra nunca. Se arregla sin
+                reinstalar nada desde <Link href="/configuracion" className="text-accent hover:underline">Configuración → Identidad del paciente</Link>,
+                que enseña qué forma tiene ese título en los PCs. En cuanto acierte, estas ocho se llenan solas.
+              </p>
+              {r && r.miracle_ms === 0 && (
+                <p className="mt-2 text-sm text-secondary">
+                  <strong>En Miracle: 0 min</strong> no es un fallo — el estudio está en fase <em>baseline</em> y Miracle todavía no se usa en el consultorio.
+                </p>
+              )}
+            </Seccion>
+          )}
 
           <Seccion titulo={`Pacientes (${filasPacientes.length})`} sub="Lo que costó cada consulta. El paciente es una huella irreversible calculada en el PC — nunca un nombre ni un documento — y el P# es el mismo de las bandas de la línea de tiempo.">
             {filasPacientes.length === 0 ? <p className="text-sm text-muted">Sin pacientes identificados. Si SAP estaba abierto, revisa la regla de extracción en Configuración o si el PC tiene SAP GUI Scripting.</p> : (

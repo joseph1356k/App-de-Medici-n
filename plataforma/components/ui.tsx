@@ -2,16 +2,6 @@ import Link from "next/link";
 import type { Estado } from "@/lib/segmentos";
 import { COLOR_ESTADO, ETIQUETA_ESTADO, ETIQUETA_FASE } from "@/lib/formato";
 
-export function Tile({ label, value, sub, hero, tono }: { label: string; value: string; sub?: string; hero?: boolean; tono?: "critico" }) {
-  return (
-    <div className={`tarjeta p-4 ${tono === "critico" ? "border-critical bg-critical-soft" : ""}`}>
-      <p className="text-xs text-muted">{label}</p>
-      <p className={`mt-1 font-semibold ${tono === "critico" ? "text-critical" : "text-ink"} ${hero ? "text-4xl" : "text-2xl"}`}>{value}</p>
-      {sub && <p className="mt-1 text-xs text-secondary">{sub}</p>}
-    </div>
-  );
-}
-
 export function Calidad({ ok, cobertura }: { ok: boolean; cobertura: number | null }) {
   return ok
     ? <span className="chip bg-good-soft text-good-text">✓ buena calidad</span>

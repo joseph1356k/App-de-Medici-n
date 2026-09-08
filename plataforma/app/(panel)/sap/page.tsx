@@ -1,5 +1,6 @@
 import { Filtros } from "@/components/Filtros";
-import { Barras } from "@/components/Barras";
+import { Barras } from "@/components/graficos/Barras";
+import { Interactivo } from "@/components/graficos/Interactivo";
 import { Seccion, Vacio } from "@/components/ui";
 import { consultoriosParaFiltro, pantallasSap, rutasSap, superficiesSap } from "@/lib/consultas";
 import { leerFiltros, type Sp } from "@/lib/filtros";
@@ -30,7 +31,14 @@ export default async function SapPage({ searchParams }: { searchParams: Promise<
           <div className="grid gap-6 lg:grid-cols-5">
             <div className="lg:col-span-2">
               <Seccion titulo="Transacciones más visitadas" sub={`${fmtNum(totalVisitas)} visitas en el rango`}>
-                <Barras ariaLabel="Visitas por transacción" items={pantallas.slice(0, 12).map((p) => ({ id: p.tcode, etiqueta: p.tcode, valor: p.visitas, texto: fmtNum(p.visitas) }))} />
+                <Interactivo modo="marca">
+                  <Barras ariaLabel="Visitas por transacción" cabeceraTabla="Transacción"
+                    filas={pantallas.slice(0, 12).map((p) => ({
+                      id: p.tcode, etiqueta: p.tcode, texto: fmtNum(p.visitas),
+                      partes: [{ id: "v", nombre: "Visitas", valor: p.visitas, color: "var(--color-s1)", texto: fmtNum(p.visitas),
+                        extra: `${fmtNum(p.jornadas)} jornadas · p95 ${fmtSeg(p.ready_p95)}` }],
+                    }))} />
+                </Interactivo>
               </Seccion>
             </div>
             <div className="lg:col-span-3">
