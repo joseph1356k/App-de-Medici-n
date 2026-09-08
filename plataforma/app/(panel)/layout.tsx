@@ -7,6 +7,7 @@ export const dynamic = "force-dynamic";
 
 const NAV = [
   { href: "/", texto: "Inicio", tambien: ["/consultorios"] },
+  { href: "/tablero", texto: "Tablero" },
   { href: "/jornadas", texto: "Jornadas" },
   { href: "/datos", texto: "Datos" },
   { href: "/comparacion", texto: "Comparación" },
@@ -27,17 +28,17 @@ export default async function PanelLayout({ children }: { children: React.ReactN
   return (
     <div className="min-h-screen">
       <header className="border-b border-line bg-surface">
-        <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3">
-          <Link href="/" className="flex items-center gap-2 font-semibold text-ink">
-            <span className="inline-block h-3 w-3 rounded-full bg-good" aria-hidden />
-            Medidor · {hospital}
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-8 gap-y-1 px-4 pt-3">
+          <Link href="/" className="flex items-center gap-2 self-start py-2 font-semibold tracking-tight text-ink">
+            <span className="inline-block h-2.5 w-2.5 rounded-full bg-good" aria-hidden />
+            Medidor <span className="text-muted">·</span> {hospital}
           </Link>
-          <span className="chip border border-line bg-plane text-secondary" title="Fase del estudio vigente hoy, según el calendario de Configuración">
-            Hoy: {ETIQUETA_FASE[fase] ?? fase}
-          </span>
-          <nav className="flex flex-wrap gap-1 text-sm print:hidden" aria-label="Secciones del panel">
+          <nav className="flex flex-wrap gap-x-5 text-sm print:hidden" aria-label="Secciones del panel">
             {NAV.map((n) => <NavEnlace key={n.href} href={n.href} tambien={n.tambien}>{n.texto}</NavEnlace>)}
           </nav>
+          <span className="chip ml-auto self-center border border-line bg-plane text-secondary" title="Fase del estudio vigente hoy, según el calendario de Configuración">
+            Hoy: {ETIQUETA_FASE[fase] ?? fase}
+          </span>
         </div>
       </header>
       <main className="mx-auto max-w-7xl space-y-6 px-4 py-6">

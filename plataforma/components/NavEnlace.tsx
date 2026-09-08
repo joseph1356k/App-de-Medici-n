@@ -10,8 +10,10 @@ export function NavEnlace({ href, children, tambien = [] }: { href: string; chil
   const ruta = usePathname() ?? "";
   const activo = ruta === href || (href !== "/" && ruta.startsWith(href + "/")) || tambien.some((t) => ruta === t || ruta.startsWith(t + "/"));
   return (
+    // Un subrayado de 2 px marca la página actual mejor que una píldora: no mete otra caja en
+    // una cabecera que ya tiene chips, y deja el menú leyéndose como una línea de texto.
     <Link href={href} aria-current={activo ? "page" : undefined}
-      className={`rounded-lg px-3 py-1.5 ${activo ? "bg-plane font-medium text-ink" : "text-secondary hover:bg-plane hover:text-ink"}`}>
+      className={`-mb-px border-b-2 px-1 py-2 ${activo ? "border-ink font-medium text-ink" : "border-transparent text-secondary hover:border-line hover:text-ink"}`}>
       {children}
     </Link>
   );

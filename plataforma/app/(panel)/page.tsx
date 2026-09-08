@@ -46,7 +46,7 @@ export default async function InicioPage() {
             {estados.map((e, i) => <TarjetaConsultorio key={e.consultorio.id} estado={e} datos={dias[i]} ventana={ventana} ahora={ahora} />)}
           </div>
           <Seccion titulo="Últimos 7 días" sub="Horas activas por consultorio y día operativo (todas las jornadas; ⚠ = calidad excluida). Clic en una celda para ver ese día.">
-            <RejillaCalor puntos={serie} consultorios={estados.map((e) => e.consultorio)} dias={fechas} />
+            <RejillaCalor puntos={serie} fechas={fechas} />
           </Seccion>
         </>
       )}

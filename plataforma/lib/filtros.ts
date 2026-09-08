@@ -75,7 +75,7 @@ export function leerFecha(sp: Sp): string {
 /** Reconstruye la query string con un cambio, para los enlaces de filtro. */
 export function conFiltro(
   f: Filtros,
-  cambios: Partial<Record<"rango" | "desde" | "hasta" | "fase" | "consultorio" | "dispositivo" | "incluir_mala" | "page" | "fecha" | "metrica", string | null>>,
+  cambios: Partial<Record<"rango" | "desde" | "hasta" | "fase" | "consultorio" | "dispositivo" | "incluir_mala" | "page" | "fecha" | "metrica" | "perfil" | "calor", string | null>>,
 ): string {
   const q = new URLSearchParams();
   const base: Record<string, string | null> = {

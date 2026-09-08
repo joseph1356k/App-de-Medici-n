@@ -39,6 +39,26 @@ export function PuntoEstado({ estado, grande }: { estado: Estado | "sin_pc"; gra
   );
 }
 
+/**
+ * LA CABECERA DE UNA PÁGINA, igual en todas: eyebrow (dónde estás) → título → una línea de qué
+ * es esto → acciones a la derecha. Que las nueve páginas empiecen igual es lo que hace que se
+ * lean como un solo panel y no como nueve pantallas cosidas.
+ */
+export function CabeceraPagina({ eyebrow, titulo, sub, acciones }: {
+  eyebrow?: string; titulo: React.ReactNode; sub?: React.ReactNode; acciones?: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
+      <div className="min-w-0">
+        {eyebrow && <p className="eyebrow mb-1.5">{eyebrow}</p>}
+        <h1 className="titulo-pagina">{titulo}</h1>
+        {sub && <p className="sub-pagina">{sub}</p>}
+      </div>
+      {acciones && <div className="flex flex-wrap items-center gap-2 print:hidden">{acciones}</div>}
+    </div>
+  );
+}
+
 export function Vacio({ titulo, texto }: { titulo: string; texto: string }) {
   return (
     <div className="tarjeta p-8 text-center">

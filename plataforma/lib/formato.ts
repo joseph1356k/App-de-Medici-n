@@ -91,6 +91,13 @@ export const ETIQUETA_FASE: Record<string, string> = {
 };
 export const FASES = ["baseline", "notes", "notes_ops"] as const;
 
+/** El color de una fase del estudio. `baseline` en gris a propósito: es el «antes», el punto de
+ * comparación, y no debe competir en la página con lo que sí es Miracle (el slot s2, el mismo con
+ * el que se pinta la app de Miracle en toda la línea de tiempo). */
+export const COLOR_FASE: Record<string, string> = {
+  baseline: "var(--color-axis)", notes: "var(--color-s2)", notes_ops: "var(--color-s7)",
+};
+
 // Los cuatro estados de una cubeta, más «sin PC» para un consultorio sin dispositivo. Los
 // colores son tokens de globals.css ordenados por luminancia: se distinguen en escala de
 // grises y con deuteranopía, que es lo que importa en una impresora del hospital.

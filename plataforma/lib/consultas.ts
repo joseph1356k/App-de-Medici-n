@@ -9,6 +9,7 @@
 import { sql } from "./db";
 import type { Filtros } from "./filtros";
 import { finDiaOperativo, hoyOperativo, inicioDiaOperativo } from "./fechas";
+import { LIMITES_ESPERA } from "./graficos";
 import {
   medicosVistos, pacientesDelDia, segmentar,
   type Bucket, type Estado, type Marca, type MedicoVisto, type PacienteDelDia, type Segmento,
@@ -297,13 +298,20 @@ export async function cobertura(f: Filtros): Promise<Cobertura> {
   return { ...c, motivos: Object.fromEntries(motivos.map((m) => [m.motivo, m.n])) };
 }
 
-export type PuntoDiario = { fecha: string; consultorio_id: string | null; nombre: string; activo_ms: number; his_ms: number; pacientes: number; calidad_ok: boolean };
+export type PuntoDiario = {
+  fecha: string; consultorio_id: string | null; nombre: string; orden: number;
+  activo_ms: number; his_ms: number; typing_ms: number; sap_wait_ms: number; ready_ms_p95: number | null;
+  pacientes: number; calidad_ok: boolean;
+};
 
 /** Una fila por día operativo y consultorio (todas las jornadas, con su bandera de calidad). */
 export async function serieDiaria(f: Filtros): Promise<PuntoDiario[]> {
   return sql<PuntoDiario[]>`
-    select j.dia_operativo::text as fecha, j.consultorio_id, coalesce(c.nombre, 'Sin consultorio') as nombre,
-      sum(j.activo_ms)::bigint as activo_ms, sum(j.his_ms)::bigint as his_ms, sum(j.pacientes)::int as pacientes, bool_and(j.calidad_ok) as calidad_ok
+    select j.dia_operativo::text as fecha, j.consultorio_id, coalesce(c.nombre, 'Sin consultorio') as nombre, coalesce(c.orden, 999) as orden,
+      sum(j.activo_ms)::bigint as activo_ms, sum(j.his_ms)::bigint as his_ms,
+      sum(j.typing_ms)::bigint as typing_ms, sum(j.sap_wait_ms)::bigint as sap_wait_ms,
+      max(j.ready_ms_p95)::bigint as ready_ms_p95,
+      sum(j.pacientes)::int as pacientes, bool_and(j.calidad_ok) as calidad_ok
     from jornada_summary j left join consultorios c on c.id = j.consultorio_id
     where ${filtroJornadas(f)}
     group by j.dia_operativo, j.consultorio_id, c.nombre, c.orden order by j.dia_operativo, c.orden nulls last`;
@@ -429,6 +437,35 @@ export async function porConsultorioYFase(f: Filtros): Promise<FilaConsultorioFa
     order by orden, nombre, array_position(array['baseline','notes','notes_ops'], j.phase)`;
 }
 
+export type FilaPerfil = {
+  consultorio_id: string | null; nombre: string; orden: number; jornadas: number;
+  hora: string; sap_ms: number; otras_ms: number; inactivo_ms: number;
+};
+
+/**
+ * EL DÍA TÍPICO: de qué está hecha cada hora, por consultorio. Sale de `por_hora_detalle`, que se
+ * precalcula al resumir la jornada — leerlo de las cubetas en caliente son 87.310 filas y 1,5 s
+ * para 30 días, y crece lineal hasta comerse el reloj de 20 s del panel.
+ *
+ * Devuelve el TOTAL del rango y cuántas jornadas lo componen; quien dibuja divide, porque «minutos
+ * por hora en una jornada típica» es lo comparable entre un rango de 3 días y uno de 30.
+ */
+export async function perfilHorario(f: Filtros): Promise<FilaPerfil[]> {
+  return sql<FilaPerfil[]>`
+    with js as (select j.* from jornada_summary j where ${buenas(f)} and j.por_hora_detalle <> '{}'::jsonb),
+      n as (select consultorio_id, count(*)::int as jornadas from js group by consultorio_id)
+    select js.consultorio_id, coalesce(c.nombre, 'Sin consultorio') as nombre, coalesce(c.orden, 999) as orden,
+      n.jornadas, h.key as hora,
+      sum(coalesce((h.value->>'sap')::bigint, 0))::bigint as sap_ms,
+      sum(coalesce((h.value->>'otras')::bigint, 0))::bigint as otras_ms,
+      sum(coalesce((h.value->>'inactivo')::bigint, 0))::bigint as inactivo_ms
+    from js
+    join n on n.consultorio_id is not distinct from js.consultorio_id
+    left join consultorios c on c.id = js.consultorio_id, lateral jsonb_each(js.por_hora_detalle) h
+    group by 1, 2, 3, 4, 5
+    order by orden, nombre, hora`;
+}
+
 // ── SAP ────────────────────────────────────────────────────────────────────
 
 const visitasEnRango = (f: Filtros) => sql`
@@ -462,6 +499,54 @@ export async function superficiesSap(f: Filtros): Promise<FilaSuperficie[]> {
       percentile_cont(0.5) within group (order by sap_wait_ms) as espera_med
     from sap_visits v where ${visitasEnRango(f)} and surface <> ''
     group by surface, tcode order by count(*) desc limit 60`;
+}
+
+/** Las visitas COMPARABLES: las del rango que además pertenecen a una jornada que entra en el
+ * estudio (buena calidad, salvo que se pida lo contrario). `visitasEnRango` ya filtra por fase. */
+const visitasComparables = (f: Filtros) => sql`
+  ${visitasEnRango(f)}
+  ${f.incluirMala ? sql`` : sql`and exists (select 1 from jornada_summary j
+      where j.device_id = v.device_id and j.dia_operativo = v.dia_operativo and j.calidad_ok)`}
+  and exists (select 1 from devices d where d.id = v.device_id and d.status <> 'retired')`;
+
+export type DistribucionEspera = { n: number; conteos: number[]; p50: number | null; p95: number | null };
+
+/**
+ * CUÁNTO SE ESPERA A SAP, repartido en tramos. Una media sola escondería lo que importa: en el
+ * HGM la mitad de las pantallas están listas en 2,4 s, pero una de cada veinte pasa de 46 s y una
+ * de cada cien de 3 minutos. Los tramos son los de `LIMITES_ESPERA` (lib/graficos.ts): el mismo
+ * sitio para el SQL y para el dibujo, así no se pueden separar.
+ */
+export async function distribucionEsperaSap(f: Filtros): Promise<DistribucionEspera> {
+  const filas = await sql<{ cubeta: number | null; n: number; p50: number | null; p95: number | null }[]>`
+    select width_bucket(v.ready_ms, ${[...LIMITES_ESPERA] as number[]}::bigint[]) as cubeta, count(*)::int as n,
+      percentile_cont(0.5) within group (order by v.ready_ms) as p50,
+      percentile_cont(0.95) within group (order by v.ready_ms) as p95
+    from sap_visits v
+    where ${visitasComparables(f)} and v.ready_ms is not null
+    group by grouping sets ((1), ())`;
+  const conteos = new Array<number>(LIMITES_ESPERA.length + 1).fill(0);
+  let total: DistribucionEspera = { n: 0, conteos, p50: null, p95: null };
+  for (const fila of filas) {
+    if (fila.cubeta == null) total = { n: Number(fila.n), conteos, p50: fila.p50 == null ? null : Number(fila.p50), p95: fila.p95 == null ? null : Number(fila.p95) };
+    else conteos[Number(fila.cubeta)] = Number(fila.n);
+  }
+  return total;
+}
+
+export type FilaEsperaTcode = { tcode: string; visitas: number; espera_total_ms: number; ready_p50: number | null; ready_p95: number | null };
+
+/** Dónde se va la espera: las transacciones que más segundos de servidor acumulan. No es la más
+ * lenta, es la que más cuesta — una pantalla de 2 s que se abre 22.000 veces pesa más que una de
+ * 40 s que se abre nueve. */
+export async function tcodesPorEspera(f: Filtros, n = 5): Promise<FilaEsperaTcode[]> {
+  return sql<FilaEsperaTcode[]>`
+    select v.tcode, count(*)::int as visitas, sum(v.sap_wait_ms)::bigint as espera_total_ms,
+      percentile_cont(0.5) within group (order by v.ready_ms) filter (where v.ready_ms is not null) as ready_p50,
+      percentile_cont(0.95) within group (order by v.ready_ms) filter (where v.ready_ms is not null) as ready_p95
+    from sap_visits v
+    where ${visitasComparables(f)} and v.tcode <> ''
+    group by v.tcode order by sum(v.sap_wait_ms) desc limit ${n}`;
 }
 
 export type FilaRuta = { de: string; a: string; veces: number };
