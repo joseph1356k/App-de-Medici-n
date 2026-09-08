@@ -3,8 +3,7 @@
 import { Leyenda, SinDatos, TablaDeSeries } from "./Piezas";
 import { apilar, bandas, rectRedondeadoArriba, topeBonito, type Fmt, type SerieXY } from "@/lib/graficos";
 
-const ANCHO = 1000;
-const IZQ = 66, DER = 14, ARR = 16, ABA = 28;
+const ARR = 16, ABA = 28;
 /** El grosor máximo de una marca. Una barra nunca llena su carril: el aire que sobra es lo que
  * deja leer la fila de al lado. */
 const GRUESO_MAX = 24;
@@ -13,6 +12,9 @@ const GRUESO_MAX = 24;
 const HUECO = 2;
 
 type Props = {
+  /** El ancho del lienzo en unidades del viewBox: ver la nota de `Lineas`. Aproximadamente los
+   * píxeles que va a ocupar, para que el texto salga del tamaño que dice. */
+  ancho?: number;
   xs: string[];
   etiquetaX: (x: string, i: number) => string;
   etiquetaLarga?: (x: string, i: number) => string;
@@ -31,10 +33,11 @@ type Props = {
 };
 
 export function Columnas({
-  xs, etiquetaX, etiquetaLarga, series, modo = "apilado", tope: topeDado, marcas,
+  ancho: ANCHO = 1000, xs, etiquetaX, etiquetaLarga, series, modo = "apilado", tope: topeDado, marcas,
   fmt, ariaLabel, alto = 220, cabeceraTabla = "", notaTabla, sinTabla,
 }: Props) {
   if (xs.length === 0 || series.length === 0) return <SinDatos />;
+  const IZQ = Math.max(44, ANCHO * 0.066), DER = Math.max(10, ANCHO * 0.014);
 
   const porX = xs.map((_, i) => series.map((s) => Math.max(0, s.valores[i] ?? 0)));
   const maximo = modo === "apilado"

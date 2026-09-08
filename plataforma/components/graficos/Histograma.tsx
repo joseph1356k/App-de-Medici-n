@@ -7,11 +7,11 @@ import { SinDatos } from "./Piezas";
 import { cubetasEspera, posicionEnCubetas } from "@/lib/graficos";
 import { fmtNum, fmtSeg } from "@/lib/formato";
 
-export function Histograma({ conteos, p50, p95, ariaLabel, alto = 220 }: {
+export function Histograma({ conteos, p50, p95, ariaLabel, alto = 220, ancho }: {
   /** Siete tramos, en el orden de `ETIQUETA_CUBETA`. */
   conteos: number[];
   p50: number | null; p95: number | null;
-  ariaLabel: string; alto?: number;
+  ariaLabel: string; alto?: number; ancho?: number;
 }) {
   const cubetas = cubetasEspera(conteos);
   const n = cubetas.reduce((s, c) => s + c.n, 0);
@@ -23,6 +23,7 @@ export function Histograma({ conteos, p50, p95, ariaLabel, alto = 220 }: {
 
   return (
     <Columnas
+      ancho={ancho}
       xs={cubetas.map((c) => c.etiqueta)}
       etiquetaX={(x) => x}
       etiquetaLarga={(x, i) => `Pantallas que tardaron ${x} · ${fmtNum(cubetas[i].n)} de ${fmtNum(n)}`}

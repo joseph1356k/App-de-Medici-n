@@ -52,8 +52,7 @@ const CALORES = [
   { id: "espera", etiqueta: "Espera SAP", campo: "sap_wait_ms" as const, fmt: fmtMin, tono: "var(--color-serious)" },
 ];
 
-const MOTIVO_PACIENTE =
-  "Depende de identificar al paciente en la pantalla de SAP, y la regla todavía no encuentra ninguno. Se arregla en Configuración → Identidad del paciente.";
+const MOTIVO_PACIENTE = "La regla todavía no encuentra al paciente en SAP. Ver abajo.";
 
 export default async function TableroPage({ searchParams }: { searchParams: Promise<Sp> }) {
   const sp = await searchParams;
@@ -163,8 +162,8 @@ export default async function TableroPage({ searchParams }: { searchParams: Prom
           <Vacio titulo="Todavía no hay jornadas en este rango"
             texto="Ningún consultorio tiene un día operativo cerrado aquí. Amplía el rango, o comprueba en Inicio que los tres PCs estén en línea." />
         ) : (
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-            <Cifra etiqueta="Activo en el PC" valor={fmtMin(k.activo_med)} variante="hero"
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-7">
+            <Cifra clase="xl:col-span-2" etiqueta="Activo en el PC" valor={fmtMin(k.activo_med)} variante="hero"
               delta={{ antes: kPrevio?.activo_med ?? null, ahora: k.activo_med, mejor: "neutro" }}
               tendencia={{ valores: chispa.activo }}
               reparto={[
@@ -219,8 +218,9 @@ export default async function TableroPage({ searchParams }: { searchParams: Prom
                 )}
                 <Interactivo modo="cruceta">
                   <Columnas
+                    ancho={mostrarPerfil.length > 1 ? 420 : 1100}
                     xs={HORAS} etiquetaX={(h) => h} etiquetaLarga={(h) => `${h}:00 – ${h}:59 · ${c.nombre}`}
-                    series={perfilDe(c.consultorio_id)} tope={topePerfil} alto={mostrarPerfil.length > 1 ? 200 : 260}
+                    series={perfilDe(c.consultorio_id)} tope={topePerfil} alto={mostrarPerfil.length > 1 ? 180 : 260}
                     fmt={(v) => `${Math.round(v / 60000)} min`} ariaLabel={`El día típico de ${c.nombre}, por hora`}
                     cabeceraTabla="Hora" notaTabla={`Media de ${fmtNum(c.jornadas)} jornadas.`}
                   />
@@ -283,7 +283,7 @@ export default async function TableroPage({ searchParams }: { searchParams: Prom
         <div className="grid gap-6 lg:grid-cols-5">
           <div className="lg:col-span-3">
             <Interactivo modo="cruceta">
-              <Histograma conteos={espera.conteos} p50={espera.p50} p95={espera.p95} ariaLabel="Distribución de la espera de SAP" />
+              <Histograma ancho={700} conteos={espera.conteos} p50={espera.p50} p95={espera.p95} ariaLabel="Distribución de la espera de SAP" />
             </Interactivo>
           </div>
           <div className="lg:col-span-2">
@@ -326,7 +326,7 @@ export default async function TableroPage({ searchParams }: { searchParams: Prom
                       return p ? num(p[calor.campo]) : null;
                     }),
                   }))}
-                  fmt={calor.fmt} ariaLabel={`${calor.etiqueta} por día y consultorio`} cabeceraTabla="Día" alto={260}
+                  ancho={1200} fmt={calor.fmt} ariaLabel={`${calor.etiqueta} por día y consultorio`} cabeceraTabla="Día" alto={280}
                 />
               </Interactivo>
             </div>

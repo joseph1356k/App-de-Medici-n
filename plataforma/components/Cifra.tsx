@@ -26,9 +26,11 @@ export type CifraProps = {
   reparto?: Parte[];
   tono?: "critico";
   href?: string;
+  /** Para que el titular de la página pueda ocupar dos columnas de la rejilla. */
+  clase?: string;
 };
 
-export function Cifra({ etiqueta, valor, sub, variante = "normal", motivo, delta, tendencia, reparto, tono, href }: CifraProps) {
+export function Cifra({ etiqueta, valor, sub, variante = "normal", motivo, delta, tendencia, reparto, tono, href, clase }: CifraProps) {
   const total = reparto?.reduce((s, p) => s + Math.max(0, p.valor), 0) ?? 0;
   const cuerpo = (
     <>
@@ -58,7 +60,7 @@ export function Cifra({ etiqueta, valor, sub, variante = "normal", motivo, delta
     </>
   );
 
-  const clase = `tarjeta cifra cifra--${variante} p-4 ${tono === "critico" ? "border-critical bg-critical-soft" : ""}`;
-  if (href) return <Link href={href} className={`${clase} block transition-colors hover:border-accent`}>{cuerpo}</Link>;
-  return <div className={clase} aria-disabled={variante === "apagada" || undefined}>{cuerpo}</div>;
+  const css = `tarjeta cifra cifra--${variante} p-4 ${tono === "critico" ? "border-critical bg-critical-soft" : ""} ${clase ?? ""}`;
+  if (href) return <Link href={href} className={`${css} block transition-colors hover:border-accent`}>{cuerpo}</Link>;
+  return <div className={css} aria-disabled={variante === "apagada" || undefined}>{cuerpo}</div>;
 }

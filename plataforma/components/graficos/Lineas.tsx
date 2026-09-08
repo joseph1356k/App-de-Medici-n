@@ -4,10 +4,16 @@
 import { Leyenda, SinDatos, TablaDeSeries } from "./Piezas";
 import { bandas, topeBonito, type Fmt, type SerieXY } from "@/lib/graficos";
 
-const ANCHO = 1000;
-const IZQ = 66, DER = 14, ARR = 14, ABA = 30;
+const ARR = 14, ABA = 30;
 
 type Props = {
+  /**
+   * El ancho del lienzo EN UNIDADES DEL VIEWBOX. Importa más de lo que parece: el SVG se estira
+   * al hueco que tenga, así que si el lienzo mide 1000 y el hueco 400 px, todo encoge 2,5× y una
+   * etiqueta de 12 acaba en 5 px, ilegible. La regla es sencilla: pasar aproximadamente los
+   * píxeles que va a medir de ancho, y así el texto sale del tamaño que dice.
+   */
+  ancho?: number;
   xs: string[];
   /** La etiqueta corta del eje («03 sept»). */
   etiquetaX: (x: string, i: number) => string;
@@ -30,11 +36,12 @@ type Props = {
  * El eje Y arranca siempre en cero. Recortarlo exagera diferencias, y aquí se decide sobre el
  * trabajo de gente real.
  */
-export function Lineas({ xs, etiquetaX, etiquetaLarga, series, fmt, ariaLabel, alto = 280, cabeceraTabla = "", notaTabla, sinTabla }: Props) {
+export function Lineas({ ancho: ANCHO = 1000, xs, etiquetaX, etiquetaLarga, series, fmt, ariaLabel, alto = 280, cabeceraTabla = "", notaTabla, sinTabla }: Props) {
   if (xs.length === 0 || series.length === 0) return <SinDatos />;
   const valores = series.flatMap((s) => s.valores.filter((v): v is number => v != null));
   if (valores.length === 0) return <SinDatos />;
 
+  const IZQ = Math.max(44, ANCHO * 0.066), DER = Math.max(10, ANCHO * 0.014);
   const tope = topeBonito(Math.max(...valores));
   const anchoUtil = ANCHO - IZQ - DER, altoUtil = alto - ARR - ABA;
   const zonas = bandas(xs.length, IZQ, ANCHO - DER);
