@@ -23,12 +23,46 @@ y como una segunda valla en el servidor ([`plataforma/lib/vocabulario.ts`](../pl
 |---|---|
 | Tiempo en primer plano y activo por app, cada 15 s, siempre (bloqueado incluido) | cuánto trabajo hay, dónde, y cuándo el PC estaba ocupado, quieto, bloqueado o apagado |
 | **Nombre del programa** que estaba delante (`sapgui`, `chrome`, `acrord32`…) | poder decir en qué se va el tiempo. Es el nombre del ejecutable, en minúsculas y saneado: nunca la ruta, ni los argumentos, ni el título de la ventana. Antes lo que no estaba en un catálogo corto se agrupaba como «otro», y con eso un tercio de la jornada quedaba medido pero sin nombre |
+| **La FORMA del título de SAP**, cuando la regla del paciente no encuentra nada (desde el medidor 2.0.6) | poder escribir esa regla. Ver abajo: es el único sitio donde una palabra del título sale del PC, y solo si es un rótulo |
+| **Los ids de los campos** de esa pantalla SAP (`txtRNF00-PATNR`), en el mismo caso | saber de qué campo sacar el identificador. Es el nombre técnico del campo, del mismo tipo que el dynpro; su CONTENIDO no se lee |
 | Cantidad de teclas, clics, scroll; tiempo en ráfagas de tecleo; seis teclas de control | escritura y esfuerzo |
 | Identidad técnica de la pantalla SAP (`sapgui://SID/TCODE/PROGRAMA/DYNPRO`) | el recorrido por el sistema |
 | Round-trips y time-to-ready de SAP | cuánto se espera al sistema |
 | Huella del paciente (32 hex) | saber que dos momentos son la misma consulta (A→B→A de urgencias) |
 | Usuario SAP (login del médico) en cada cubeta | anotar qué médico estaba en el consultorio; el estudio agrupa por consultorio, no por médico |
 | Nombre del PC, versión de Windows y del medidor, cuántas veces arrancó | operar la instalación y saber si el instrumento estuvo entero |
+
+## La forma del título — un ensanche deliberado, y sus límites
+
+La regla que identifica al paciente se escribe contra el título de la ventana de SAP, pero el título
+**no sale del PC**. Resultado: quien escribe la regla lo hace a ciegas. En el HGM eso costó seis días
+de estudio con 25.277 pantallas leídas y **cero** pacientes identificados — ocho métricas vacías — sin
+que nadie pudiera ver contra qué texto estaba fallando la expresión regular.
+
+Desde el medidor **2.0.6**, cuando la regla falla en una pantalla, el PC manda la **forma** del
+título: cada dígito pasa a `#`, cada letra a `x`, y quedan en claro **solo** las palabras de una
+lista cerrada de rótulos de SAP (`Paciente`, `PATNR`, `NHC`, `Historia`, `Caso`, `CC`, `TI`…). Un
+título real como
+
+> `Historia clínica — Juan Pérez Gómez (CC 123456789) · Paciente 00123456`
+
+sale del PC como
+
+> `Historia clínica — xxxx xxxxx xxxxx (CC #########) · Paciente ########`
+
+Se manda **una vez por pantalla y por jornada** (no en cada uno de los ~2.500 avisos del día), y solo
+en el evento `encounter_unknown`, junto a los **ids** de los campos de esa pantalla — nunca su
+contenido.
+
+**Lo que esto ensancha, dicho sin rodeos:** hasta la 2.0.5 ninguna palabra del título salía del PC.
+Ahora salen las del diccionario. **Lo que se mantiene entero:** ni un dígito, y ninguna palabra que
+no esté en la lista — es decir, nunca un nombre y nunca un documento. La comparación es por palabra
+completa, así que «Ingrid» no pasa por «ingreso» ni «Cecilia» por «cédula». Lo fija la **promesa 35**
+del contrato, que lo comprueba con un título hostil de verdad, y el código está en
+`medidor/Dominio/FormaDelTitulo.cs` con el diccionario a la vista.
+
+Si el hospital prefiere no ceder ni eso, la alternativa es enmascarar también los rótulos y escribir
+la regla por posición: menos útil, y por eso no es lo que está puesto.
 
 ## Pseudonimización, no anonimización — dicho con claridad
 

@@ -1,6 +1,6 @@
 import { Seccion } from "@/components/ui";
-import { ajustesDelPanel, consultorios, fasesDelEstudio, roster } from "@/lib/consultas";
-import { ETIQUETA_FASE, FASES, fmtFecha, fmtNum } from "@/lib/formato";
+import { ajustesDelPanel, consultorios, fasesDelEstudio, formasDeTitulo, roster } from "@/lib/consultas";
+import { ETIQUETA_FASE, FASES, fmtFecha, fmtNum, fmtRelativo } from "@/lib/formato";
 import { borrarFase, fijarFase, guardarConfig, guardarConsultorio, guardarHospital, guardarRoster } from "./actions";
 
 /**
@@ -11,7 +11,9 @@ import { borrarFase, fijarFase, guardarConfig, guardarConsultorio, guardarHospit
  */
 export default async function ConfiguracionPage({ searchParams }: { searchParams: Promise<{ ok?: string; error?: string }> }) {
   const sp = await searchParams;
-  const [a, lista, medicos, fases] = await Promise.all([ajustesDelPanel(), consultorios(), roster(), fasesDelEstudio()]);
+  const [a, lista, medicos, fases, formas] = await Promise.all([ajustesDelPanel(), consultorios(), roster(), fasesDelEstudio(), formasDeTitulo()]);
+  const conForma = formas.filter((f) => f.forma);
+  const sinForma = formas.filter((f) => !f.forma).reduce((n, f) => n + f.veces, 0);
   const textoRoster = medicos.filter((m) => m.active).map((m) => `${m.display_name}${m.sap_users.length ? " | " + m.sap_users.join(", ") : ""}`).join("\n");
   const inactivos = medicos.filter((m) => !m.active);
 
@@ -93,6 +95,70 @@ export default async function ConfiguracionPage({ searchParams }: { searchParams
             {inactivos.length > 0 && <span className="text-xs text-muted">Inactivos (con jornadas ya medidas): {inactivos.map((m) => m.display_name).join(", ")}</span>}
           </div>
         </form>
+      </Seccion>
+
+      {/* ── Identidad del paciente ─────────────────────────────────────── */}
+      <Seccion
+        titulo="Identidad del paciente"
+        sub="De aquí sale la regla que separa una consulta de la siguiente. Ocho métricas del estudio —pacientes, duración de la consulta, post-atención, arranque, cola, interrupciones— dependen de que esta regla acierte, y hoy no acierta ninguna vez."
+      >
+        {conForma.length === 0 ? (
+          <div className="rounded-xl border border-warning bg-warning-soft p-4 text-sm text-ink">
+            <p>
+              <strong>Todavía no hay formas de título que mirar.</strong>{" "}
+              {sinForma > 0
+                ? <>Los PCs mandaron <strong>{fmtNum(sinForma)}</strong> avisos de «no encontré al paciente» en los últimos 7 días, pero sin decir contra qué texto estaban fallando: eso lo añade el medidor <strong>2.0.6</strong>.</>
+                : <>Ningún PC ha reportado pantallas SAP sin paciente en los últimos 7 días.</>}
+            </p>
+            <p className="mt-2 text-xs text-secondary">
+              Instala la v2.0.6 en los tres PCs (doble clic, conserva todo) y en unos minutos esta tabla se llena sola.
+            </p>
+          </div>
+        ) : (
+          <div className="caja-tabla">
+            <table className="tabla tabla--cebra">
+              <thead>
+                <tr>
+                  <th>Forma del título</th><th>Transacción</th><th>Campos de la pantalla</th>
+                  <th className="num">Veces</th><th className="num">PCs</th><th>Última</th>
+                </tr>
+              </thead>
+              <tbody>
+                {conForma.map((f, i) => (
+                  <tr key={i}>
+                    <td className="font-mono text-xs text-ink">{f.forma}</td>
+                    <td className="font-mono text-xs text-secondary">{f.tcode ?? "—"}</td>
+                    <td className="max-w-xs truncate font-mono text-xs text-secondary" title={f.campos ?? ""}>{f.campos ?? "—"}</td>
+                    <td className="num">{fmtNum(f.veces)}</td>
+                    <td className="num">{fmtNum(f.pcs)}</td>
+                    <td className="whitespace-nowrap text-xs text-muted">{fmtRelativo(f.ultima)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <details className="mt-3 text-xs text-secondary">
+          <summary className="cursor-pointer text-accent">Cómo se lee esto y cómo se escribe la regla</summary>
+          <div className="mt-2 space-y-2">
+            <p>
+              La <strong>forma</strong> es el título de la ventana de SAP enmascarado <em>en el PC</em>: cada dígito es un <code>#</code>,
+              cada letra una <code>x</code>, y quedan en claro solo las palabras de una lista cerrada de rótulos («Paciente», «Historia»,
+              «CC»…). Nunca sale un nombre ni un documento. Sirve para ver <em>dónde</em> está el número y <em>qué</em> rótulo lo precede.
+            </p>
+            <p>
+              Si la forma dice <code>Paciente ######## xxxxx</code>, la regla es{" "}
+              <code>{'{ "id": "titulo-patnr", "tcode": "*", "fuente": "titulo_sap", "patron": "Paciente\D*0*([0-9]{5,10})", "normalizar": "digitos_sin_ceros" }'}</code>.
+            </p>
+            <p>
+              Si el título <strong>no</strong> lleva el número (solo rótulos y <code>x</code>), hay que sacarlo de un campo: mira la columna
+              «campos de la pantalla» —son los ids técnicos, no su contenido— y usa{" "}
+              <code>{'{ "fuente": "campo", "selector": "wnd[0]/usr/txtRNF00-PATNR", "patron": "([0-9]+)" }'}</code>. Ese selector se lee
+              con la transacción de esa fila en <code>tcode</code>, para no leer un campo en la pantalla equivocada.
+            </p>
+            <p>La regla se escribe abajo, en «reglas_identidad», y los PCs la obedecen en el siguiente latido. No hay que reinstalar nada.</p>
+          </div>
+        </details>
       </Seccion>
 
       <Seccion titulo={`Config del medidor (versión ${a.config_version})`} sub="Lo que obedece el .exe. «apps_por_proceso» dice qué proceso cuenta como qué app (el valor «sap» activa la lectura de pantallas). «reglas_identidad» dice de dónde sale el identificador del paciente que se hashea en el PC: el título de la ventana SAP (regex, se conserva solo el primer grupo) o un campo por selector. El crudo nunca sale del PC.">

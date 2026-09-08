@@ -56,6 +56,10 @@ public sealed class HiloSap : IDisposable
     /// lo hashea y lo suelta. Corre en el hilo que llama; SapGui protege con Busy.</summary>
     public string? LeerCampo(string selector) => _sap.ValorActual(selector);
 
+    /// <summary>Los ids de los campos de la pantalla (nunca su contenido), para el diagnóstico que
+    /// permite escribir la regla del paciente desde el panel. Mismo camino que LeerCampo.</summary>
+    public string? InventarioDeCampos() => _sap.InventarioDeCampos();
+
     private void Bucle()
     {
         while (_vivo)

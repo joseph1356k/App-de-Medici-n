@@ -51,6 +51,12 @@ public sealed class Orquestador
     private long _proximoReintentoDeGanchosMono;
     private long? _sapDelanteSinMotorDesdeMono;
     private bool _sinScriptingAvisadoEnJornada;
+
+    /// <summary>Las pantallas de las que ya se mandó la FORMA del título en esta jornada. El
+    /// diagnóstico sirve una vez por pantalla: mandarlo en los ~2.500 `encounter_unknown` de un día
+    /// sería 2.500 copias de la misma cadena. El tope corta un SAP que invente pantallas.</summary>
+    private readonly HashSet<string> _formasDiagnosticadas = new(StringComparer.Ordinal);
+    private const int TopeDeFormasPorJornada = 40;
     private long _proximoLogSinScriptingMono;
 
     public Orquestador(
@@ -89,7 +95,11 @@ public sealed class Orquestador
     }
 
     /// <summary>Al cambiar el día operativo: los avisos «una vez por jornada» se rearman.</summary>
-    public void NuevaJornada() => _sinScriptingAvisadoEnJornada = false;
+    public void NuevaJornada()
+    {
+        _sinScriptingAvisadoEnJornada = false;
+        _formasDiagnosticadas.Clear();
+    }
 
     /// <summary>Un tick. <paramref name="pared"/> es la hora LOCAL del hospital: ancla la cubeta y el
     /// día operativo (la clave de la huella se deriva de ella en cada tick, promesa 30).</summary>
@@ -297,16 +307,16 @@ public sealed class Orquestador
         if (partes == null) return;
 
         var clave = _claveDelDia(pared);
-        if (clave == null) { EncounterDesconocido(limpia, "sin_clave", null, pared); return; } // sin secreto no hay huella; el tiempo SAP igual se mide
+        if (clave == null) { EncounterDesconocido(limpia, "sin_clave", null, null, pared); return; } // sin secreto no hay huella; el tiempo SAP igual se mide
 
         var reglas = cfg.Reglas();
         var aplicables = reglas.Where(r => r.Tcode == "*" || string.Equals(r.Tcode, partes.Value.Tcode, StringComparison.OrdinalIgnoreCase)).ToList();
-        if (aplicables.Count == 0) { EncounterDesconocido(limpia, "sin_regla", null, pared); return; }
+        if (aplicables.Count == 0) { EncounterDesconocido(limpia, "sin_regla", null, tituloSap, pared); return; }
 
         // La extracción es por regla remota: título SAP con regex, o UN campo por selector. El
         // crudo entra a la regla, sale un grupo, se hashea y se suelta. No se guarda en ningún sitio.
         var extraido = ReglasDeIdentidad.Extraer(aplicables, partes.Value.Tcode, _sap.LeerCampo, tituloSap);
-        if (extraido == null) { EncounterDesconocido(limpia, "sin_match", aplicables[0].Id, pared); return; } // sin paciente en esta pantalla: se conserva el encounter vigente
+        if (extraido == null) { EncounterDesconocido(limpia, "sin_match", aplicables[0].Id, tituloSap, pared); return; } // sin paciente en esta pantalla: se conserva el encounter vigente
 
         var nuevo = Huella.DeIdentificador(clave, extraido.Value.IdNormalizado);
         if (nuevo == _encounterVigente) return;
@@ -318,15 +328,30 @@ public sealed class Orquestador
             new Dictionary<string, object?> { ["rule"] = extraido.Value.ReglaId });
     }
 
-    /// <summary>`encounter_unknown`: UNA vez por entrada a una pantalla SAP cuando no hay encounter
-    /// vigente y la extracción falla. Dice por qué (sin_clave · sin_regla · sin_match) y con qué
-    /// regla: es lo que permite afinar las reglas desde el panel sin ver ninguna pantalla.</summary>
-    private void EncounterDesconocido(string surface, string reason, string? rule, DateTimeOffset pared)
+    /// <summary>
+    /// `encounter_unknown`: UNA vez por entrada a una pantalla SAP cuando no hay encounter vigente y
+    /// la extracción falla. Dice por qué (sin_clave · sin_regla · sin_match) y con qué regla.
+    ///
+    /// Y, la primera vez que una pantalla falla en la jornada, dice también CÓMO ES el título
+    /// —enmascarado, ver <see cref="FormaDelTitulo"/>— y qué campos tiene la pantalla (sus ids, no
+    /// su contenido). Sin eso, escribir la regla del paciente es adivinar: en el HGM la regla por
+    /// defecto falló 25.277 veces seguidas y nadie podía ver contra qué texto estaba fallando.
+    /// </summary>
+    private void EncounterDesconocido(string surface, string reason, string? rule, string? tituloSap, DateTimeOffset pared)
     {
         if (_encounterVigente != null) return;
         if (_encounterUnknownEmitidoEn == surface) return;
         _encounterUnknownEmitidoEn = surface;
-        _emitirEvento("encounter_unknown", pared, null, new Dictionary<string, object?> { ["reason"] = reason, ["rule"] = rule });
+
+        var detalle = new Dictionary<string, object?> { ["reason"] = reason, ["rule"] = rule };
+        if (reason != "sin_clave" && _formasDiagnosticadas.Count < TopeDeFormasPorJornada && _formasDiagnosticadas.Add(surface))
+        {
+            var forma = FormaDelTitulo.Enmascarar(tituloSap);
+            if (forma.Length > 0) detalle["forma"] = forma;
+            var campos = _sap.InventarioDeCampos();
+            if (!string.IsNullOrWhiteSpace(campos)) detalle["campos"] = campos;
+        }
+        _emitirEvento("encounter_unknown", pared, null, detalle);
     }
 
     /// <summary>Se olvida el encounter (emite `encounter_exit` con el motivo): al cambiar de día la

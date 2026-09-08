@@ -61,6 +61,7 @@ internal static class Contrato
         Prueba("32. un 403 de «no te conozco» vuelve a registrar; uno de pausa deliberada, no", LosDos403SeDistinguen);
         Prueba("33. si SAP no deja engancharse, el aviso al médico se espacia en vez de repetirse", ElEngancheNoAtosiga);
         Prueba("34. un tramo en el que no pasa nada viaja como UNA fila que cubre los mismos ms, ni uno más", LosTramosVaciosSeFunden);
+        Prueba("35. del título de SAP solo puede salir su FORMA: ni un dígito, ni una palabra que no sea un rótulo", LaFormaNoLlevaNiUnDato);
 
         Console.WriteLine();
         Console.WriteLine(_fallos == 0
@@ -931,6 +932,65 @@ internal static class Contrato
     /// suma de los `bucket_ms` emitidos tiene que ser exactamente la del tramo medido, y el tramo
     /// tiene que cortarse en cuanto pasa algo, cambia el contexto o cambia el día operativo.
     /// </summary>
+    /// <summary>
+    /// PROMESA 35. El diagnóstico que permite escribir la regla del paciente sin ver una pantalla.
+    ///
+    /// POR QUÉ EXISTE: la regla se escribe contra el título de la ventana de SAP, pero el título no
+    /// sale del PC — así que quien la escribe lo hace a ciegas. En el HGM eso costó 25.277 pantallas
+    /// leídas y CERO pacientes identificados durante seis días, con ocho métricas del estudio
+    /// vacías, porque nadie podía ver contra qué texto estaba fallando la regex.
+    ///
+    /// EL ENSANCHE, dicho aquí y no escondido: hasta la v2.0.5 NINGUNA palabra del título salía del
+    /// PC (promesa 1). Desde la v2.0.6 sale la FORMA, y en ella sobreviven en claro las palabras de
+    /// un diccionario cerrado de rótulos de SAP —«Paciente», «Historia», «CC»…—, que son nombres de
+    /// campo, nunca datos de nadie. Lo que esta promesa fija es la frontera exacta: de un título
+    /// hostil no puede salir ni un dígito, ni el nombre, ni el apellido, ni el documento, ni una
+    /// sola palabra que no esté en el diccionario.
+    /// </summary>
+    private static void LaFormaNoLlevaNiUnDato()
+    {
+        var forma = FormaDelTitulo.Enmascarar(TituloHostil + " · Paciente 00123456");
+
+        Debe(!forma.Contains("Juan"), "el nombre no sobrevive a la máscara");
+        Debe(!forma.Contains("Pérez") && !forma.Contains("Perez"), "el apellido tampoco");
+        Debe(!forma.Contains("Gómez") && !forma.Contains("Gomez"), "ni el segundo apellido");
+        Debe(!forma.Any(char.IsDigit), "ni un solo dígito: el documento y el número de paciente son # a secas");
+        Debe(!forma.Contains("Google") && !forma.Contains("Chrome"), "una palabra que no es rótulo se enmascara, aunque sea inofensiva");
+
+        Debe(forma.Contains("Paciente"), "el rótulo sí sobrevive: sin él la regla no se puede escribir");
+        Debe(forma.Contains("Historia") && forma.Contains("clínica"), "y los del diccionario también, con sus tildes");
+        Debe(forma.Contains("CC"), "las siglas de tipo de documento son rótulos, no datos");
+        Debe(forma.Contains("########"), "y la longitud del número se conserva: es lo que permite escribir [0-9]{5,10}");
+        Debe(forma.Length <= FormaDelTitulo.Tope, $"la forma no pasa de {FormaDelTitulo.Tope} caracteres");
+
+        // Una palabra del diccionario NO puede colarse por ser parte de otra: la comparación es
+        // por palabra completa. «Ingrid» no es «ingreso» y «Cecilia» no es «cédula».
+        var nombres = FormaDelTitulo.Enmascarar("Ingrid Cecilia Casorla Historial");
+        Debe(!nombres.Contains("Ingr") && !nombres.Contains("Cec") && !nombres.Contains("Casorla") && !nombres.Contains("Historial"),
+            "un nombre que EMPIEZA como un rótulo se enmascara igual: la comparación es por palabra entera");
+
+        Debe(FormaDelTitulo.Enmascarar(null) == "" && FormaDelTitulo.Enmascarar("   ") == "", "sin título, forma vacía");
+
+        // Y el lote: la forma viaja, el título no. Es la misma valla de la promesa 1, con la clave
+        // nueva puesta a prueba — `Cable` solo deja pasar `forma` y `campos`, no `titulo`.
+        using var spool = new SpoolSqlite(RutaTemporal("forma.db"));
+        var t0 = new DateTimeOffset(2026, 9, 7, 13, 0, 0, TimeSpan.Zero);
+        spool.Encolar("eventos", Cable.Evento("encounter_unknown", t0, null, new Dictionary<string, object?>
+        {
+            ["reason"] = "sin_match",
+            ["rule"] = "titulo-patnr",
+            ["forma"] = forma,
+            ["campos"] = "txtRNF00-PATNR ctxtRNF00-FALNR",
+            ["titulo"] = TituloHostil,   // lo que un cliente con un bug podría intentar colar
+        }));
+        var lote = Lote.Serializar("dev-1", Guid.NewGuid().ToString(), t0, VersionDePrueba, spool.Tomar(new LimitesDeLote()));
+
+        Debe(!lote.Contains("Juan") && !lote.Contains("123456789"), "el lote sigue sin nombre y sin documento");
+        Debe(!lote.Contains("Google"), "ni ninguna palabra del título fuera del diccionario");
+        Debe(lote.Contains("\"forma\""), "la forma sí viaja: es el diagnóstico");
+        Debe(lote.Contains("txtRNF00-PATNR"), "y los ids de los campos también: son nombres técnicos, no contenido");
+    }
+
     private static void LosTramosVaciosSeFunden()
     {
         var app = new Superficie("sap", "sapgui://PRD/NV2000/P/0100");

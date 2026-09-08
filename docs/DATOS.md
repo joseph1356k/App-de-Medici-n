@@ -96,7 +96,10 @@ cambiar el contexto; los segmentos se reparten ese ancho en proporción a su `fo
 ## `eventos`
 
 `device_id`, `consultorio_id`, `dia_operativo`, `occurred_at`, `kind`, `encounter_key`, `detail` (objeto
-con claves de una lista cerrada: `reason`, `ms`, `count`, `user`, `rule`, `version`…; nunca texto libre).
+con claves de una lista cerrada: `reason`, `ms`, `count`, `user`, `rule`, `version`… y, solo en
+`encounter_unknown`, `forma` —el título de SAP enmascarado en el PC— y `campos` —los ids de los campos
+de la pantalla—; nunca texto libre: lo que no está en la lista se descarta en el .exe y otra vez en el
+servidor).
 
 `kind`: `jornada_inicio` · `jornada_fin` · `encounter_enter` · `encounter_exit` · `encounter_unknown` ·
 `lock` · `unlock` · `suspend` · `resume` · `medidor_start` (con `reason`: `arranque`, `relanzado`,

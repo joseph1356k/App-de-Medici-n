@@ -166,3 +166,23 @@ describe("el ancho declarado de una fila", () => {
     expect(m.bucket_ms).toBe(TRAMO_MAX_MS);
   });
 });
+
+// EL DIAGNÓSTICO DE LA IDENTIDAD (medidor 2.0.6). `forma` es el título de SAP enmascarado en el
+// PC y `campos` los ids de los campos de la pantalla: dos claves nuevas en la lista blanca, que
+// es la segunda valla de privacidad. Lo que NO puede pasar es que se ensanche a más que eso.
+describe("las claves del diagnóstico de identidad", () => {
+  it("forma y campos entran; el título crudo sigue sin entrar", () => {
+    const e = filaEvento(ctx, {
+      spool_seq: 1, occurred_at: T, kind: "encounter_unknown",
+      detail: { reason: "sin_match", rule: "titulo-patnr", forma: "Paciente ######## xxxx", campos: "txtRNF00-PATNR", titulo: TITULO },
+    });
+    expect(e.detail).toEqual({ reason: "sin_match", rule: "titulo-patnr", forma: "Paciente ######## xxxx", campos: "txtRNF00-PATNR" });
+  });
+
+  it("campos tiene su propio tope: 25 ids no caben en 120 caracteres", () => {
+    const largo = Array.from({ length: 40 }, (_, i) => `txtRNF00-CAMPO${i}`).join(" ");
+    const e = filaEvento(ctx, { spool_seq: 1, occurred_at: T, kind: "encounter_unknown", detail: { campos: largo, forma: "x".repeat(300) } });
+    expect((e.detail.campos as string).length).toBe(600);
+    expect((e.detail.forma as string).length).toBe(120);
+  });
+});

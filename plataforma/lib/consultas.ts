@@ -504,6 +504,48 @@ export async function distribucionConsultas(f: Filtros): Promise<DistribucionCon
 
 // ── Consultorios, dispositivos, roster, fases, ajustes ────────────────────
 
+export type FormaDeTitulo = {
+  forma: string | null; campos: string | null; tcode: string | null; reason: string;
+  veces: number; pcs: number; primera: string | null; ultima: string | null;
+};
+
+/**
+ * LAS FORMAS DE TÍTULO vistas por los PCs cuando la regla del paciente no encontró nada.
+ *
+ * Es el diagnóstico que hace escribible la regla: el medidor manda el título de SAP ENMASCARADO
+ * (dígito → #, letra → x, en claro solo los rótulos) y los ids de los campos de esa pantalla, una
+ * vez por pantalla y jornada. Con eso se ve dónde está el número del paciente y qué rótulo lo
+ * precede, sin que salga del PC ni un dato de nadie. Ver docs/PRIVACIDAD.md.
+ *
+ * Los eventos anteriores al medidor 2.0.6 no traen `forma` y caen todos en una fila con `forma`
+ * nula: eso es lo que se ve mientras los PCs no estén actualizados, y por eso la fila se cuenta
+ * igual en vez de esconderse.
+ *
+ * La transacción se averigua mirando qué pantalla SAP tenía ese PC en los 2 min anteriores. Ese
+ * `join` se hace SOLO sobre las (≤ 40) formas ya agrupadas, no sobre los ~25.000 eventos del día:
+ * medido, la diferencia es 46 ms contra 3,3 s.
+ */
+export async function formasDeTitulo(dias = 7): Promise<FormaDeTitulo[]> {
+  return sql<FormaDeTitulo[]>`
+    with g as (
+      select e.detail->>'forma' as forma, e.detail->>'campos' as campos,
+        coalesce(e.detail->>'reason', 'sin_match') as reason,
+        count(*)::int as veces, count(distinct e.device_id)::int as pcs,
+        min(e.occurred_at) as primera, max(e.occurred_at) as ultima,
+        (array_agg(e.device_id order by e.occurred_at desc))[1] as device_id
+      from events e
+      where e.kind = 'encounter_unknown' and e.occurred_at > now() - (${dias} || ' days')::interval
+      group by 1, 2, 3 order by count(*) desc limit 40)
+    select g.forma, g.campos, g.reason, g.veces, g.pcs, g.primera, g.ultima,
+      substring(s.surface from '^sapgui://[^/]+/([^/]*)') as tcode
+    from g left join lateral (
+      select sm.surface from samples sm
+      where sm.device_id = g.device_id and sm.bucket_start <= g.ultima
+        and sm.bucket_start > g.ultima - interval '2 minutes' and sm.app = 'sap' and sm.surface is not null
+      order by sm.bucket_start desc limit 1) s on true
+    order by g.veces desc`;
+}
+
 export type Consultorio = { id: string; nombre: string; orden: number; activo: boolean; dispositivos: number; jornadas: number };
 
 export async function consultorios(): Promise<Consultorio[]> {

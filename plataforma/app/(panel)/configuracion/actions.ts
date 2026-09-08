@@ -121,7 +121,16 @@ export async function guardarConfig(formData: FormData): Promise<void> {
   for (const r of reglas as Record<string, unknown>[]) {
     if (!r || typeof r.id !== "string" || typeof r.patron !== "string") volver("error", "Cada regla necesita «id» y «patron».");
     try { new RegExp(r.patron); } catch { volver("error", `La regla «${r.id}» tiene una expresión regular inválida.`); }
-    if (!["titulo_sap", "campo"].includes(`${r.fuente ?? "titulo_sap"}`)) volver("error", `La regla «${r.id}»: fuente debe ser titulo_sap o campo.`);
+    const fuente = `${r.fuente ?? "titulo_sap"}`;
+    if (!["titulo_sap", "campo"].includes(fuente)) volver("error", `La regla «${r.id}»: fuente debe ser titulo_sap o campo.`);
+    // Una regla `campo` sin selector no lee nada y falla en silencio en los tres PCs.
+    if (fuente === "campo" && !`${r.selector ?? ""}`.trim())
+      volver("error", `La regla «${r.id}»: con fuente «campo» hace falta «selector» (el id del campo en SAP, p. ej. "wnd[0]/usr/txtRNF00-PATNR").`);
+    // El .exe devuelve null ante un modo que no conoce, así que un typo aquí se traduce en
+    // «sin_match» para siempre y sin una sola pista. Se caza al guardar, no en producción.
+    if (!["digitos_sin_ceros", "tal_cual"].includes(`${r.normalizar ?? "digitos_sin_ceros"}`))
+      volver("error", `La regla «${r.id}»: normalizar debe ser digitos_sin_ceros o tal_cual.`);
+    if (r.tcode != null && typeof r.tcode !== "string") volver("error", `La regla «${r.id}»: tcode debe ser texto ("*" o una transacción).`);
   }
   for (const k of ["dominios_permitidos", "dominios_miracle"]) if (cfg[k] != null && !Array.isArray(cfg[k])) volver("error", `«${k}» debe ser una lista.`);
   delete cfg.config_version;

@@ -22,9 +22,17 @@ export const KINDS = new Set([
 export const CLAVES_DETALLE = new Set([
   "from", "to", "ms", "reason", "count", "user", "run_id", "workflow_id",
   "steps", "rule", "version", "total_ms", "align_ms", "outcome",
+  // Diagnóstico de la identidad del paciente (medidor 2.0.6). `forma` es el título de la ventana
+  // SAP ENMASCARADO en el PC —cada dígito un #, cada letra una x, y en claro solo las palabras de
+  // un diccionario cerrado de rótulos— y `campos` son los ids técnicos de los campos de esa
+  // pantalla, nunca su contenido. Es lo que permite escribir la regla del paciente sin ver una
+  // sola pantalla real. Ver docs/PRIVACIDAD.md y la promesa 35 del contrato.
+  "forma", "campos",
 ]);
 
 const TOPE_TEXTO = 120;
+// `campos` lleva hasta 25 ids técnicos y no cabe en 120. Única clave con tope propio.
+const TOPES_PROPIOS: Record<string, number> = { campos: 600 };
 
 // Superficies que el medidor puede reportar. Cualquier otra forma se rechaza: una
 // superficie con forma inesperada podría llevar un título colado.
@@ -37,7 +45,8 @@ export function saneaDetalle(detail: unknown): Detalle {
   if (!detail || typeof detail !== "object" || Array.isArray(detail)) return limpio;
   for (const [clave, v] of Object.entries(detail as Record<string, unknown>)) {
     if (!CLAVES_DETALLE.has(clave)) continue;
-    if (typeof v === "string") limpio[clave] = v.length <= TOPE_TEXTO ? v : v.slice(0, TOPE_TEXTO);
+    const tope = TOPES_PROPIOS[clave] ?? TOPE_TEXTO;
+    if (typeof v === "string") limpio[clave] = v.length <= tope ? v : v.slice(0, tope);
     else if (v === null || typeof v === "number" || typeof v === "boolean") limpio[clave] = v;
     // objetos/arrays anidados NO entran: un detail no es un contenedor libre
   }

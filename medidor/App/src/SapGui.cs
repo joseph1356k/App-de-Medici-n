@@ -125,6 +125,69 @@ public sealed class SapGui
         }
     }
 
+    /// <summary>
+    /// LOS IDS DE LOS CAMPOS de la pantalla actual — `txtRNF00-PATNR ctxtRNF00-FALNR …` — para poder
+    /// escribir una regla `fuente: "campo"` desde el panel sin viajar al hospital a mirar la
+    /// pantalla con el modo depuración de SAP GUI.
+    ///
+    /// Viajan los IDENTIFICADORES, jamás el contenido: un id es el nombre técnico del campo en el
+    /// diccionario de datos de SAP, del mismo tipo que el dynpro o el programa que ya se mandan.
+    /// Aquí NO se llama a `.Text` ni una vez — esa lectura sigue siendo exclusiva de
+    /// <see cref="ValorActual"/>, que solo se invoca cuando una regla lo pide.
+    /// </summary>
+    public string? InventarioDeCampos()
+    {
+        try
+        {
+            dynamic? s = _ultimaSesion;
+            if (s == null) return null;
+            if ((bool)s.Busy) return null;
+            dynamic? area = s.FindById("wnd[0]/usr", false);
+            if (area == null) return null;
+
+            var ids = new List<string>();
+            Recoger(area, ids, 0);
+            return ids.Count == 0 ? null : string.Join(" ", ids);
+        }
+        catch (Exception e)
+        {
+            Registro.Anota("sap", $"inventario de campos no legible: {e.GetType().Name}");
+            return null;
+        }
+    }
+
+    private const int MaxCampos = 25, MaxProfundidad = 3;
+
+    /// <summary>Recorre el área de usuario buscando cajas de texto. Baja por los contenedores
+    /// (sub/ssub/tabs) porque en NWP1 los campos que importan viven dentro de un subdynpro, pero
+    /// con tope de profundidad y de cuenta: esto corre con el médico esperando.</summary>
+    private static void Recoger(dynamic nodo, List<string> ids, int profundidad)
+    {
+        if (ids.Count >= MaxCampos || profundidad > MaxProfundidad) return;
+        dynamic hijos;
+        try { hijos = nodo.Children; } catch { return; }
+        int n;
+        try { n = (int)hijos.Count; } catch { return; }
+
+        for (int i = 0; i < n && ids.Count < MaxCampos; i++)
+        {
+            dynamic hijo;
+            string id;
+            try { hijo = hijos.ElementAt(i); id = Str(hijo.Id); } catch { continue; }
+            var hoja = Limpio(id[(id.LastIndexOf('/') + 1)..]);
+            if (hoja.Length == 0) continue;
+
+            if (hoja.StartsWith("txt", StringComparison.OrdinalIgnoreCase) || hoja.StartsWith("ctxt", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!ids.Contains(hoja)) ids.Add(hoja);
+                continue;
+            }
+            if (hoja.StartsWith("sub", StringComparison.OrdinalIgnoreCase) || hoja.StartsWith("ssub", StringComparison.OrdinalIgnoreCase)
+                || hoja.StartsWith("tabs", StringComparison.OrdinalIgnoreCase) || hoja.StartsWith("tabp", StringComparison.OrdinalIgnoreCase))
+                Recoger(hijo, ids, profundidad + 1);
+        }
+    }
+
     private static VistaSap Identidad(dynamic s)
     {
         dynamic info = s.Info;

@@ -22,9 +22,16 @@ public static class Cable
     {
         "from", "to", "ms", "reason", "count", "user", "run_id", "workflow_id",
         "steps", "rule", "version", "total_ms", "align_ms", "outcome",
+        // Diagnóstico de la identidad del paciente (v2.0.6). `forma` es el título de SAP
+        // ENMASCARADO (dígito → #, letra → x, salvo rótulos: FormaDelTitulo) y `campos` son los
+        // ids de los campos de la pantalla, nunca su contenido. Ver docs/PRIVACIDAD.md.
+        "forma", "campos",
     };
 
     private const int TopeDeTextoEnDetail = 120;
+    /// <summary>`campos` lleva hasta 25 ids técnicos y no cabe en 120. Es la única clave con un
+    /// tope propio; el resto sigue en el de siempre.</summary>
+    private static readonly Dictionary<string, int> TopesPropios = new(StringComparer.Ordinal) { ["campos"] = 600 };
 
     public static string Muestra(Muestra m) => JsonSerializer.Serialize(new Dictionary<string, object?>
     {
@@ -64,9 +71,10 @@ public static class Cable
             foreach (var (clave, valor) in detail)
             {
                 if (!ClavesDeDetail.Contains(clave)) continue;
+                var tope = TopesPropios.TryGetValue(clave, out var propio) ? propio : TopeDeTextoEnDetail;
                 limpio[clave] = valor switch
                 {
-                    string s => s.Length <= TopeDeTextoEnDetail ? s : s[..TopeDeTextoEnDetail],
+                    string s => s.Length <= tope ? s : s[..tope],
                     bool or int or long or double or null => valor,
                     _ => null, // un objeto anidado no tiene nada que hacer en un detail
                 };
