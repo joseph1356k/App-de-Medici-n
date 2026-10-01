@@ -35,6 +35,9 @@ export const COLUMNAS = {
 
 export type Coleccion = keyof typeof COLUMNAS;
 
+// Las cubetas y los eventos salen de `samples_todas` y `events_todas`: lo caliente y lo archivado
+// (schema.sql § El archivo). Exportar desde `samples` dejaría fuera, sin avisar, todo lo de más de
+// 7 días: justo las jornadas de la línea base.
 const jornadasFiltradas = (f: Filtros) => sql`select j.device_id, j.dia_operativo from jornada_summary j where ${filtroJornadas(f)}`;
 
 export function consulta(col: Coleccion, f: Filtros) {
@@ -67,7 +70,7 @@ export function consulta(col: Coleccion, f: Filtros) {
         x.sap_user, medico_de(x.sap_user) as medico_id, r.display_name as medico,
         x.foreground_ms, x.active_ms, x.typing_ms, x.keystrokes, x.clicks, x.scroll_ticks, x.context_switches, x.sap_roundtrips, x.sap_wait_ms,
         x.tabs, x.enters, x.correcciones, x.copias, x.pegados, x.guardados
-        from samples x
+        from samples_todas x
         left join jornada_summary j on j.device_id = x.device_id and j.dia_operativo = x.dia_operativo
         left join roster r on r.id = medico_de(x.sap_user)
         where (x.device_id, x.dia_operativo) in (${jornadasFiltradas(f)}) order by x.bucket_start, x.seq`;
@@ -79,7 +82,7 @@ export function consulta(col: Coleccion, f: Filtros) {
         where (v.device_id, v.dia_operativo) in (${jornadasFiltradas(f)}) order by v.entered_at`;
     case "eventos":
       return sql`select e.device_id, e.consultorio_id, e.dia_operativo::text as dia_operativo, e.occurred_at, e.kind, e.encounter_key, e.detail
-        from events e where (e.device_id, e.dia_operativo) in (${jornadasFiltradas(f)}) order by e.occurred_at`;
+        from events_todas e where (e.device_id, e.dia_operativo) in (${jornadasFiltradas(f)}) order by e.occurred_at`;
   }
 }
 

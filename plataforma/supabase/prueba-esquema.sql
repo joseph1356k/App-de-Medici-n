@@ -238,5 +238,70 @@ do $$ declare j jornada_summary%rowtype; begin
   if j.ventana_ms <> 780000 then raise exception 'tramo mutilado: ventana_ms % (esperado 780000)', j.ventana_ms; end if;
 end $$;
 
+-- EL ARCHIVO (schema.sql § El archivo). La jornada del PC-CONS-01 del 2026-09-01, ya resumida
+-- arriba, pasa al archivo. Lo que se promete:
+--   · no se pierde nada: cada cubeta y cada evento sale igual por samples_todas / events_todas,
+--     comparado fila por fila con su texto entero;
+--   · el resumen recalculado desde el archivo es el mismo que desde la tabla;
+--   · lo que llega tarde se suma sin duplicar lo que ya estaba archivado;
+--   · desarchivar devuelve todo a la tabla;
+--   · ni el día en curso ni una jornada con filas sin consultorio se archivan.
+do $$
+declare
+  pc constant uuid := '22222222-2222-2222-2222-222222222222';
+  dia constant date := date '2026-09-01';
+  c1 constant uuid := (select id from consultorios where nombre = 'Consultorio 1');
+  m_antes text; m_despues text; e_antes text; e_despues text; r_antes text; r_despues text; a record;
+begin
+  perform recompute_jornada(pc, dia);
+  select md5(string_agg(row(s.*)::text, '|' order by s.id)) into m_antes from samples s where s.device_id = pc and s.dia_operativo = dia;
+  select md5(string_agg(row(e.*)::text, '|' order by e.id)) into e_antes from events e where e.device_id = pc and e.dia_operativo = dia;
+  select (to_jsonb(j) - 'resumido_en')::text into r_antes from jornada_summary j where j.device_id = pc and j.dia_operativo = dia;
+
+  select * into a from archivar_jornada(pc, dia);
+  if a.n_muestras <> 361 or a.n_eventos <> 2 then raise exception 'archivar_jornada movió % cubetas y % eventos (esperado 361 y 2)', a.n_muestras, a.n_eventos; end if;
+  if exists (select 1 from samples s where s.device_id = pc and s.dia_operativo = dia) then raise exception 'archivar_jornada dejó cubetas en samples'; end if;
+  if exists (select 1 from events e where e.device_id = pc and e.dia_operativo = dia) then raise exception 'archivar_jornada dejó eventos en events'; end if;
+  if (select filas from samples_archivo where device_id = pc and dia_operativo = dia) <> 361 then raise exception 'samples_archivo no dice 361 filas'; end if;
+
+  select md5(string_agg(row(s.*)::text, '|' order by s.id)) into m_despues from samples_todas s where s.device_id = pc and s.dia_operativo = dia;
+  select md5(string_agg(row(e.*)::text, '|' order by e.id)) into e_despues from events_todas e where e.device_id = pc and e.dia_operativo = dia;
+  if m_despues is distinct from m_antes then raise exception 'archivo: alguna cubeta no sale igual por samples_todas'; end if;
+  if e_despues is distinct from e_antes then raise exception 'archivo: algún evento no sale igual por events_todas'; end if;
+
+  perform recompute_jornada(pc, dia);
+  select (to_jsonb(j) - 'resumido_en')::text into r_despues from jornada_summary j where j.device_id = pc and j.dia_operativo = dia;
+  if r_despues is distinct from r_antes then raise exception 'archivo: el resumen recalculado desde el archivo no es el mismo'; end if;
+
+  -- Llegan tarde una cubeta nueva y el reenvío de una ya archivada (la primera del día).
+  insert into samples (device_id, consultorio_id, dia_operativo, bucket_start, bucket_ms, seq, app, foreground_ms, active_ms)
+  values (pc, c1, dia, timestamptz '2026-09-01 12:00:00-05', 15000, 0, 'sap', 15000, 9000),
+         (pc, c1, dia, timestamptz '2026-09-01 08:00:00-05', 15000, 0, 'chrome', 15000, 12000);
+  select * into a from archivar_jornada(pc, dia);
+  if a.n_muestras <> 2 then raise exception 'archivar_jornada con llegadas tardías movió % (esperado 2)', a.n_muestras; end if;
+  if (select filas from samples_archivo where device_id = pc and dia_operativo = dia) <> 362 then
+    raise exception 'archivo tras la llegada tardía: % filas (esperado 362: la nueva sí, el reenvío no)', (select filas from samples_archivo where device_id = pc and dia_operativo = dia); end if;
+  if (select count(*) from samples_todas s where s.device_id = pc and s.dia_operativo = dia) <> 362 then raise exception 'samples_todas no ve las 362 cubetas'; end if;
+
+  -- Desarchivar lo devuelve todo, con sus mismos id.
+  select * into a from desarchivar_jornada(pc, dia);
+  if a.n_muestras <> 362 or a.n_eventos <> 2 then raise exception 'desarchivar_jornada devolvió % cubetas y % eventos (esperado 362 y 2)', a.n_muestras, a.n_eventos; end if;
+  if exists (select 1 from samples_archivo where device_id = pc and dia_operativo = dia) then raise exception 'desarchivar_jornada dejó la fila del archivo'; end if;
+  if (select md5(string_agg(row(s.*)::text, '|' order by s.id)) from samples s where s.device_id = pc and s.dia_operativo = dia and s.bucket_start <> timestamptz '2026-09-01 12:00:00-05') is distinct from m_antes then
+    raise exception 'desarchivar_jornada no devolvió las cubetas tal como estaban'; end if;
+
+  -- Lo que no se archiva.
+  select * into a from archivar_jornada(pc, dia_operativo_de(now()));
+  if a.n_muestras + a.n_eventos <> 0 then raise exception 'archivar_jornada archivó el día en curso'; end if;
+  select * into a from archivar_jornada('44444444-4444-4444-4444-444444444444', dia);
+  if a.n_muestras + a.n_eventos <> 0 then raise exception 'archivar_jornada archivó una jornada con cubetas sin consultorio'; end if;
+  if not exists (select 1 from samples s where s.device_id = '44444444-4444-4444-4444-444444444444') then raise exception 'la jornada sin consultorio perdió sus cubetas'; end if;
+
+  -- archivar_cerradas recoge la jornada cerrada y se salta la que no tiene consultorio.
+  select * into a from archivar_cerradas(7, 10);
+  if a.n_muestras <> 362 then raise exception 'archivar_cerradas movió % cubetas (esperado 362)', a.n_muestras; end if;
+  if (select count(*) from samples_archivo) <> 1 then raise exception 'archivar_cerradas: % filas en el archivo (esperado 1)', (select count(*) from samples_archivo); end if;
+end $$;
+
 select 'prueba-esquema: todo en orden' as resultado;
 rollback;

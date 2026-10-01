@@ -107,6 +107,23 @@ servidor).
 `sap_scripting_no_disponible` · `clock_jump` · `spool_drop` · `spool_reset` · `hooks_degradados` ·
 `hooks_rearmados` · `config_applied` · `consultorio_asignado` · `ops_run` · `calidad`.
 
+## Dónde viven las muestras y los eventos: caliente y archivo
+
+Las `muestras` y los `eventos` de los últimos 7 días operativos viven en sus tablas (`samples`,
+`events`), una fila por cubeta o por evento. Los de las jornadas más viejas pasan cada mañana, con el
+cron de `/api/tareas/resumir`, a `samples_archivo` y `events_archivo`: una fila por PC y día con todas
+sus cubetas en un texto comprimido. **No se pierde ningún campo de ninguna fila**, ni su `id`.
+
+Quien lea la base directamente debe usar las vistas **`samples_todas`** y **`events_todas`**: tienen
+las mismas columnas que las tablas y unen lo caliente con lo archivado. El resumen de la jornada, la
+línea de tiempo del día y la exportación ya leen de ellas, así que en el panel y en los archivos
+exportados no cambia nada. `visitas_sap` no se archiva.
+
+Para devolver un día a las tablas: `select * from desarchivar_jornada('<device_id>', '<dia>')`.
+
+Medido el 2026-10-01, al archivar las primeras 65 jornadas: las cubetas ocupan unas diez veces menos
+archivadas que en la tabla con sus índices.
+
 ## Catálogos
 
 - `consultorios`: `id`, `nombre`, `orden`, `activo`.

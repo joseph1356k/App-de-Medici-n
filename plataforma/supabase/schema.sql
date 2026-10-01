@@ -283,9 +283,7 @@ create table if not exists events (
   detail jsonb not null default '{}'::jsonb
 );
 alter table events enable row level security;
-create index if not exists events_device_time_idx on events (device_id, occurred_at);
 create index if not exists events_consultorio_dia_idx on events (consultorio_id, dia_operativo);
-create index if not exists events_kind_idx on events (kind, occurred_at desc);
 
 -- ── Visitas SAP: el recorrido por el HIS, como segmentos ─────────────────────
 create table if not exists sap_visits (
@@ -440,6 +438,79 @@ create index if not exists jornada_summary_dia_idx on jornada_summary (dia_opera
 create index if not exists jornada_summary_phase_idx on jornada_summary (phase, consultorio_id);
 create index if not exists jornada_summary_sucia_idx on jornada_summary (dia_operativo) where sucia;
 
+-- ── El archivo: las jornadas cerradas, en frío ───────────────────────────────
+-- `samples` y `events` son el 70 % del peso de la base y solo se leen por día: la línea de
+-- tiempo de UN día, el resumen de UNA jornada, la exportación. El 2026-10-01, con tres PCs y un
+-- mes de estudio, eran 483.078 cubetas y 144.421 eventos: 206 MB en un Postgres de 500 MB, y
+-- crecían 50 MB por semana.
+--
+-- Una jornada cerrada (más de 7 días operativos) pasa de sus miles de filas a UNA fila por PC y
+-- día, con todas sus cubetas en un solo texto (un arreglo JSON de arreglos) que Postgres guarda
+-- comprimido. NO SE PIERDE NADA: cada cubeta conserva todos sus campos, hasta su `id`, y
+-- `desarchivar_jornada` la devuelve a `samples` tal cual estaba.
+--
+-- Nadie tiene que saber dónde vive una cubeta: las vistas `samples_todas` y `events_todas` unen
+-- lo caliente y lo archivado con las mismas columnas que la tabla. El resumen, la línea de
+-- tiempo del día y la exportación leen de ellas. La ingesta sigue escribiendo en `samples` y
+-- `events`, que es donde llega lo nuevo.
+--
+-- `sap_visits` NO se archiva: el tablero de SAP la recorre por rangos de semanas.
+--
+-- El orden de los campos dentro de cada cubeta archivada es el de las vistas de abajo, y NO se
+-- toca: cambiarlo deja ilegible lo ya archivado. Un campo nuevo va AL FINAL.
+create table if not exists samples_archivo (
+  device_id uuid not null references devices(id) on delete cascade,
+  dia_operativo date not null,
+  filas int not null,
+  datos text not null,
+  archivado_en timestamptz not null default now(),
+  primary key (device_id, dia_operativo)
+);
+alter table samples_archivo enable row level security;
+create index if not exists samples_archivo_dia_idx on samples_archivo (dia_operativo);
+
+create table if not exists events_archivo (
+  device_id uuid not null references devices(id) on delete cascade,
+  dia_operativo date not null,
+  filas int not null,
+  datos text not null,
+  archivado_en timestamptz not null default now(),
+  primary key (device_id, dia_operativo)
+);
+alter table events_archivo enable row level security;
+create index if not exists events_archivo_dia_idx on events_archivo (dia_operativo);
+
+-- Las horas viajan como microsegundos desde 1970 (enteros): exactas y cortas.
+create or replace view samples_todas as
+select s.id, s.device_id, s.consultorio_id, s.dia_operativo, s.bucket_start, s.bucket_ms, s.seq, s.app, s.surface, s.encounter_key, s.sap_user,
+  s.foreground_ms, s.active_ms, s.typing_ms, s.keystrokes, s.clicks, s.scroll_ticks, s.context_switches, s.sap_roundtrips, s.sap_wait_ms,
+  s.tabs, s.enters, s.correcciones, s.copias, s.pegados, s.guardados, s.created_at
+from samples s
+union all
+select (c.j->>0)::bigint, a.device_id, (c.j->>1)::uuid, a.dia_operativo,
+  timestamptz 'epoch' + (c.j->>2)::bigint * interval '1 microsecond', (c.j->>3)::int, (c.j->>4)::smallint,
+  c.j->>5, c.j->>6, c.j->>7, c.j->>8,
+  (c.j->>9)::int, (c.j->>10)::int, (c.j->>11)::int, (c.j->>12)::int, (c.j->>13)::int, (c.j->>14)::int, (c.j->>15)::int, (c.j->>16)::int, (c.j->>17)::int,
+  (c.j->>18)::int, (c.j->>19)::int, (c.j->>20)::int, (c.j->>21)::int, (c.j->>22)::int, (c.j->>23)::int,
+  timestamptz 'epoch' + (c.j->>24)::bigint * interval '1 microsecond'
+from samples_archivo a cross join lateral jsonb_array_elements(a.datos::jsonb) as c(j);
+
+create or replace view events_todas as
+select e.id, e.event_uid, e.device_id, e.consultorio_id, e.dia_operativo, e.occurred_at, e.recorded_at, e.encounter_key, e.kind, e.detail
+from events e
+union all
+select (c.j->>0)::bigint, c.j->>1, a.device_id, (c.j->>2)::uuid, a.dia_operativo,
+  timestamptz 'epoch' + (c.j->>3)::bigint * interval '1 microsecond',
+  timestamptz 'epoch' + (c.j->>4)::bigint * interval '1 microsecond',
+  c.j->>5, c.j->>6, c.j->7
+from events_archivo a cross join lateral jsonb_array_elements(a.datos::jsonb) as c(j);
+
+-- Los dos índices de `events` que nadie leía (medido el 2026-10-01 con pg_stat_all_indexes: 2 y 5
+-- lecturas en un mes, 21 MB entre los dos). Se quitan aquí para que volver a aplicar este archivo
+-- no los resucite.
+drop index if exists events_kind_idx;
+drop index if exists events_device_time_idx;
+
 -- ============================================================================
 -- FUNCIONES
 -- ============================================================================
@@ -489,6 +560,10 @@ $$;
 -- hace menos, solo la marca sucia y devuelve false (la ingesta lo llama cada minuto; el cron
 -- termina lo sucio).
 --
+-- Lee las cubetas de `samples_todas`, no de `samples`: una jornada archivada se resume igual que
+-- una caliente. Si leyera solo lo caliente, recalcular un día archivado (basta subir algo_version)
+-- lo dejaría en cero.
+--
 -- Definiciones:
 --   activo_ms          cubetas con input en los últimos 60 s (active_ms del .exe)
 --   his_ms             activo con app = 'sap' · miracle_ms: activo con app = 'miracle_web'
@@ -522,7 +597,7 @@ begin
   end if;
   select consultorio_id into v_dev_cons from devices where id = p_device;
   -- El consultorio de la jornada es una foto: el estampado en la última cubeta del día, si no el del PC.
-  select coalesce((select s.consultorio_id from samples s where s.device_id = p_device and s.dia_operativo = p_dia and s.consultorio_id is not null
+  select coalesce((select s.consultorio_id from samples_todas s where s.device_id = p_device and s.dia_operativo = p_dia and s.consultorio_id is not null
                    order by s.bucket_start desc, s.seq desc limit 1), v_dev_cons) into v_cons;
 
   -- 1) Los encuentros: lo que costó cada paciente.
@@ -533,7 +608,7 @@ begin
   with b as (
     select bucket_start, seq, app, encounter_key, sap_user, active_ms, typing_ms, keystrokes, clicks, tabs, enters, correcciones, copias, pegados, guardados,
       greatest(coalesce(nullif(bucket_ms, 0), 15000), greatest(foreground_ms, 0))::bigint as ancho_ms
-    from samples s where s.device_id = p_device and s.dia_operativo = p_dia and s.encounter_key is not null),
+    from samples_todas s where s.device_id = p_device and s.dia_operativo = p_dia and s.encounter_key is not null),
   pac as (
     -- El paciente pudo quedarse abierto mientras nadie tocaba el PC: esa cubeta cuenta con lo que
     -- cubre de verdad (lo declarado, o lo medido si es mas), no con 15 s de oficio.
@@ -592,7 +667,7 @@ begin
       s.foreground_ms, s.active_ms, s.typing_ms, s.keystrokes, s.clicks, s.scroll_ticks, s.context_switches,
       s.sap_roundtrips, s.sap_wait_ms, s.tabs, s.enters, s.correcciones, s.copias, s.pegados, s.guardados,
       coalesce(nullif(s.bucket_ms, 0), 15000)::bigint as declarado_ms
-    from samples s where s.device_id = p_device and s.dia_operativo = p_dia),
+    from samples_todas s where s.device_id = p_device and s.dia_operativo = p_dia),
   -- CUÁNTO CUBRE UNA CUBETA DE VERDAD. Lo declarado en bucket_ms es un MÍNIMO, no la respuesta.
   -- El medidor funde los tramos en los que no pasa nada en UNA fila que declara el tramo entero
   -- (hasta 5 min), y el servidor recortaba ese bucket_ms a 15 s al guardarlo: de un tramo de tres
@@ -837,5 +912,138 @@ begin
   values ('srv:consultorio_asignado:' || gen_random_uuid()::text, p_device, p_consultorio, dia_operativo_de(now()), now(),
           'consultorio_asignado', jsonb_build_object('to', coalesce(v_nombre, 'ninguno')));
   return query select v_m, v_e, v_v, v_j;
+end;
+$$;
+
+-- ── Archivar y desarchivar una jornada ───────────────────────────────────────
+-- Saca de `samples` y de `events` las filas de un PC en un día operativo y las deja en el
+-- archivo, dentro de la misma llamada: o pasan todas o no pasa ninguna. Devuelve cuántas movió.
+--
+-- No archiva (y devuelve cero sin tocar nada):
+--   · el día operativo en curso ni el anterior: todavía pueden llegar cubetas;
+--   · una jornada con filas sin consultorio: `asignar_consultorio` las estampa en `samples`, y
+--     archivadas no las encontraría.
+-- Si la jornada ya estaba archivada y llegaron filas después (un PC que estuvo días sin red),
+-- se suman a lo archivado; una fila que ya estaba archivada no se duplica.
+create or replace function archivar_jornada(p_device uuid, p_dia date)
+returns table (n_muestras int, n_eventos int)
+language plpgsql as $$
+declare v_m int := 0; v_e int := 0; v_datos jsonb; v_previo jsonb;
+begin
+  if p_dia >= dia_operativo_de(now()) - 1 then return query select 0, 0; return; end if;
+  if exists (select 1 from samples s where s.device_id = p_device and s.dia_operativo = p_dia and s.consultorio_id is null)
+     or exists (select 1 from events e where e.device_id = p_device and e.dia_operativo = p_dia and e.consultorio_id is null) then
+    return query select 0, 0; return;
+  end if;
+
+  with fuera as (
+    delete from samples s where s.device_id = p_device and s.dia_operativo = p_dia returning s.*)
+  select count(*)::int, jsonb_agg(jsonb_build_array(
+      f.id, f.consultorio_id, (extract(epoch from f.bucket_start) * 1000000)::bigint, f.bucket_ms, f.seq,
+      f.app, f.surface, f.encounter_key, f.sap_user,
+      f.foreground_ms, f.active_ms, f.typing_ms, f.keystrokes, f.clicks, f.scroll_ticks, f.context_switches, f.sap_roundtrips, f.sap_wait_ms,
+      f.tabs, f.enters, f.correcciones, f.copias, f.pegados, f.guardados,
+      (extract(epoch from f.created_at) * 1000000)::bigint) order by f.bucket_start, f.seq, f.id)
+    into v_m, v_datos from fuera f;
+  if v_m > 0 then
+    select a.datos::jsonb into v_previo from samples_archivo a where a.device_id = p_device and a.dia_operativo = p_dia;
+    if v_previo is not null then
+      -- La clave natural de una cubeta es (PC, bucket_start, seq): posiciones 2 y 4.
+      select coalesce(jsonb_agg(x.j), '[]'::jsonb) into v_datos from jsonb_array_elements(v_datos) x(j)
+        where not exists (select 1 from jsonb_array_elements(v_previo) y(j) where y.j->2 = x.j->2 and y.j->4 = x.j->4);
+      v_datos := v_previo || v_datos;
+    end if;
+    insert into samples_archivo as a (device_id, dia_operativo, filas, datos)
+    values (p_device, p_dia, jsonb_array_length(v_datos), v_datos::text)
+    on conflict (device_id, dia_operativo) do update set filas = excluded.filas, datos = excluded.datos, archivado_en = now();
+  end if;
+
+  v_datos := null; v_previo := null;
+  with fuera as (
+    delete from events e where e.device_id = p_device and e.dia_operativo = p_dia returning e.*)
+  select count(*)::int, jsonb_agg(jsonb_build_array(
+      f.id, f.event_uid, f.consultorio_id, (extract(epoch from f.occurred_at) * 1000000)::bigint,
+      (extract(epoch from f.recorded_at) * 1000000)::bigint, f.encounter_key, f.kind, f.detail) order by f.occurred_at, f.id)
+    into v_e, v_datos from fuera f;
+  if v_e > 0 then
+    select a.datos::jsonb into v_previo from events_archivo a where a.device_id = p_device and a.dia_operativo = p_dia;
+    if v_previo is not null then
+      -- La clave natural de un evento es su event_uid: posición 1.
+      select coalesce(jsonb_agg(x.j), '[]'::jsonb) into v_datos from jsonb_array_elements(v_datos) x(j)
+        where not exists (select 1 from jsonb_array_elements(v_previo) y(j) where y.j->1 = x.j->1);
+      v_datos := v_previo || v_datos;
+    end if;
+    insert into events_archivo as a (device_id, dia_operativo, filas, datos)
+    values (p_device, p_dia, jsonb_array_length(v_datos), v_datos::text)
+    on conflict (device_id, dia_operativo) do update set filas = excluded.filas, datos = excluded.datos, archivado_en = now();
+  end if;
+
+  return query select v_m, v_e;
+end;
+$$;
+
+-- Lo contrario: devuelve una jornada archivada a `samples` y `events`, con sus mismos `id`, y
+-- borra su fila del archivo. Para reabrir un día, y para probar que archivar no pierde nada.
+create or replace function desarchivar_jornada(p_device uuid, p_dia date)
+returns table (n_muestras int, n_eventos int)
+language plpgsql as $$
+declare v_m int := 0; v_e int := 0;
+begin
+  insert into samples (id, device_id, consultorio_id, dia_operativo, bucket_start, bucket_ms, seq, app, surface, encounter_key, sap_user,
+    foreground_ms, active_ms, typing_ms, keystrokes, clicks, scroll_ticks, context_switches, sap_roundtrips, sap_wait_ms,
+    tabs, enters, correcciones, copias, pegados, guardados, created_at)
+  overriding system value
+  select (c.j->>0)::bigint, a.device_id, (c.j->>1)::uuid, a.dia_operativo,
+    timestamptz 'epoch' + (c.j->>2)::bigint * interval '1 microsecond', (c.j->>3)::int, (c.j->>4)::smallint,
+    c.j->>5, c.j->>6, c.j->>7, c.j->>8,
+    (c.j->>9)::int, (c.j->>10)::int, (c.j->>11)::int, (c.j->>12)::int, (c.j->>13)::int, (c.j->>14)::int, (c.j->>15)::int, (c.j->>16)::int, (c.j->>17)::int,
+    (c.j->>18)::int, (c.j->>19)::int, (c.j->>20)::int, (c.j->>21)::int, (c.j->>22)::int, (c.j->>23)::int,
+    timestamptz 'epoch' + (c.j->>24)::bigint * interval '1 microsecond'
+  from samples_archivo a cross join lateral jsonb_array_elements(a.datos::jsonb) as c(j)
+  where a.device_id = p_device and a.dia_operativo = p_dia
+  on conflict (device_id, bucket_start, seq) do nothing;
+  get diagnostics v_m = row_count;
+  delete from samples_archivo a where a.device_id = p_device and a.dia_operativo = p_dia;
+
+  insert into events (id, event_uid, device_id, consultorio_id, dia_operativo, occurred_at, recorded_at, encounter_key, kind, detail)
+  overriding system value
+  select (c.j->>0)::bigint, c.j->>1, a.device_id, (c.j->>2)::uuid, a.dia_operativo,
+    timestamptz 'epoch' + (c.j->>3)::bigint * interval '1 microsecond',
+    timestamptz 'epoch' + (c.j->>4)::bigint * interval '1 microsecond',
+    c.j->>5, c.j->>6, c.j->7
+  from events_archivo a cross join lateral jsonb_array_elements(a.datos::jsonb) as c(j)
+  where a.device_id = p_device and a.dia_operativo = p_dia
+  on conflict (event_uid) do nothing;
+  get diagnostics v_e = row_count;
+  delete from events_archivo a where a.device_id = p_device and a.dia_operativo = p_dia;
+
+  return query select v_m, v_e;
+end;
+$$;
+
+-- Archiva las jornadas cerradas: las de hace más de p_dias días operativos que todavía tienen
+-- filas calientes. De la más vieja a la más nueva y como mucho p_max por llamada, para que una
+-- sola sentencia no se coma el statement_timeout: el cron la llama hasta que devuelve cero.
+create or replace function archivar_cerradas(p_dias int default 7, p_max int default 10)
+returns table (jornadas int, n_muestras int, n_eventos int)
+language plpgsql as $$
+declare v_corte date := dia_operativo_de(now()) - greatest(2, coalesce(p_dias, 7));
+  v_j int := 0; v_m int := 0; v_e int := 0; r record; a record;
+begin
+  for r in
+    select x.device_id, x.dia_operativo from (
+      select s.device_id, s.dia_operativo from samples s where s.dia_operativo < v_corte
+      union
+      select e.device_id, e.dia_operativo from events e where e.dia_operativo < v_corte) x
+    -- Las que tienen filas sin consultorio no se pueden archivar: fuera de la lista, o las
+    -- mismas p_max jornadas imposibles taparían a las que sí se pueden.
+    where not exists (select 1 from samples s where s.device_id = x.device_id and s.dia_operativo = x.dia_operativo and s.consultorio_id is null)
+      and not exists (select 1 from events e where e.device_id = x.device_id and e.dia_operativo = x.dia_operativo and e.consultorio_id is null)
+    order by x.dia_operativo, x.device_id limit greatest(1, coalesce(p_max, 10))
+  loop
+    select * into a from archivar_jornada(r.device_id, r.dia_operativo);
+    v_j := v_j + 1; v_m := v_m + a.n_muestras; v_e := v_e + a.n_eventos;
+  end loop;
+  return query select v_j, v_m, v_e;
 end;
 $$;
