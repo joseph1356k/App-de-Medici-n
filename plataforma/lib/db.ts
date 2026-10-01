@@ -53,7 +53,15 @@ function opciones(url: string | undefined) {
     max: 10,
     // Cortos los dos, porque en serverless el proceso se CONGELA sin avisar: cuanto antes
     // se suelte y se recicle un socket, menos posibilidades de heredar uno muerto.
-    idle_timeout: 8,
+    //
+    // idle_timeout eran 8 s y son 20, y no más. Con 8, casi cada lote de cada PC (uno por
+    // minuto) abría una conexión nueva: 5.220 al día, y cada una deja tres líneas en los logs
+    // del pooler de Supabase, que cuentan para su cuota de Log Ingestion (10 MB al día, con la
+    // cuota del ciclo ya pasada el 2026-10-01). Medido ese día, entre una conexión y la
+    // siguiente pasaban menos de 20 s el 69 % de las veces (mediana 14 s, p75 28 s): con 20 s
+    // esas se reutilizan. No se sube más porque lo de arriba sigue siendo verdad: un socket
+    // ocioso más tiempo es un socket con más ocasión de morir congelado.
+    idle_timeout: 20,
     max_lifetime: 60 * 5,
     connect_timeout: 8,
     ssl: local ? false : ("require" as const),
