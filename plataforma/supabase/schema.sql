@@ -284,6 +284,9 @@ create table if not exists events (
 );
 alter table events enable row level security;
 create index if not exists events_consultorio_dia_idx on events (consultorio_id, dia_operativo);
+-- Por PC y día, como samples_device_dia_idx: es por donde buscan archivar_jornada y
+-- archivar_cerradas, y cubre la clave foránea a devices (sin él, borrar un PC recorre la tabla).
+create index if not exists events_device_dia_idx on events (device_id, dia_operativo);
 
 -- ── Visitas SAP: el recorrido por el HIS, como segmentos ─────────────────────
 create table if not exists sap_visits (
