@@ -183,7 +183,7 @@ export async function visitasDelDia(consultorioId: string, fecha: string): Promi
 
 export async function eventosDelDia(consultorioId: string, fecha: string): Promise<Marca[]> {
   const filas = await sql<{ t: string; kind: string; detail: Marca["detail"] }[]>`
-    select occurred_at as t, kind, detail from events
+    select occurred_at as t, kind, detail from events_todas
     where consultorio_id = ${consultorioId}::uuid and dia_operativo = ${fecha}::date order by occurred_at`;
   return filas.map((e) => ({ t: iso(e.t)!, kind: e.kind, detail: e.detail ?? {} }));
 }
@@ -195,9 +195,12 @@ export async function lineaDeTiempoDia(consultorioId: string, fecha: string): Pr
   const finDia = finDiaOperativo(fecha);
   const hasta = finDia < new Date().toISOString() ? finDia : new Date().toISOString();
 
+  // Las cubetas y los eventos de un día se leen de `samples_todas` y `events_todas`: una jornada de
+  // más de 7 días vive en el archivo (schema.sql § El archivo), y la línea de tiempo no tiene por
+  // qué saberlo. Leída de `samples`, un día archivado saldría vacío: un «sin datos» que miente.
   const [buckets, marcas, visitas, resumenes, roster] = await Promise.all([
     sql<Bucket[]>`select bucket_start, bucket_ms, seq, app, surface, encounter_key, sap_user, foreground_ms, active_ms, typing_ms, keystrokes, clicks, sap_wait_ms
-      from samples where consultorio_id = ${consultorioId}::uuid and dia_operativo = ${fecha}::date order by bucket_start, seq`,
+      from samples_todas where consultorio_id = ${consultorioId}::uuid and dia_operativo = ${fecha}::date order by bucket_start, seq`,
     eventosDelDia(consultorioId, fecha),
     visitasDelDia(consultorioId, fecha),
     sql<JornadaResumen[]>`select ${columnasResumen} ${desdeResumen}
